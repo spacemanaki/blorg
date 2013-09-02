@@ -1,0 +1,1 @@
+This is the source for my blog, hosted [here](http://spacemanaki.com/). It uses an unholy concoction of Org mode (Emacs) and Octopress, which is [here](https://github.com/spacemanaki/octorgopress).
