@@ -17,6 +17,48 @@ In my [[http://spacemanaki.com/blog/2013/08/31/Polymorphic-streams-in-ML/][last 
 
 Before publishing the previous post, I wrote a lexer and a parser for s-expressions, using readers and streams. I chose this because it's a very small language that's easy to parse with recursive descent, but it's also complicated enough that the code illustrates some of the issues you'd encounter writing larger parsers.
 
+## crash course on s-expressions
+
+To refresh your memory (or introduce you if you haven't used Lisp or Scheme) /s-expressions/ are the textual representation of Lisp and Scheme source code and list literals. The subtle relationship between code and data is where Lisp draws much of its metaprogramming power, but that's quite far from the scope of this post. If you're not familiar with them, it's safe to think of s-expressions as a lightweight notation for nested lists:
+
+#+BEGIN_SRC scheme
+  (1 2 (3 4) 5 (6 (7) 8) 9 0)
+#+END_SRC
+
+Just keep in mind that they can also be used to represent Lisp and Scheme code:
+
+#+NAME: some Scheme code
+#+BEGIN_SRC scheme
+  (define (fact n)
+    (if (= n 0) 1
+        (* n (fact (- n 1)))))
+#+END_SRC
+
+To make it a bit more interesting, I decided to implement another feature of s-expressions: "dotted pairs" or "improper lists". In Lisp, lists are constructed using the familar `cons` function, which can be used the same way it is in ML. In ML the type of `cons` (i.e. `::`) is `'a * 'a list -> 'a list`, and the compiler checks this for us. In Lisp, without static types, `cons` can be used the same way, and usually is: the first argument is something atomic, and the second argument is a list. The empty list or nil denotes the end of the list, just as in ML. But it's possible to use it to construct arbitrary pairs, and for the second element to be atomic too, in which case that pair is printed with a dot:
+
+#+BEGIN_SRC scheme
+  > (cons 1 (cons 2 nil))
+  (1 2)
+  > (cons 1 2)
+  (1 . 2)
+  > (cons 1 (cons 2 (cons 3 4)))
+  (1 2 3 . 4)
+#+END_SRC
+
+#+NAME: binary trees using lists
+#+BEGIN_SRC scheme :exports none
+  (define (data t) (car t))
+  (define (left t) (cadr t))
+  (define (right t) (caddr t))
+  (define (lookup t x)
+    (let ((y (and (not (null? t)) (data t))))
+      (cond
+       ((not y) #f)
+       ((= x y) #t)
+       ((< x y) (lookup (left t) x))
+       ((> x y) (lookup (right t) x)))))
+#+END_SRC
+
 ## reader
 
 Recall that a reader is a peek function over a stream; it takes a stream and returns an element and new stream (wrapped in `'a option`). Concretely, the type of a reader, as defined in [[http://www.standardml.org/Basis/string-cvt.html][StringCvt]] is:
