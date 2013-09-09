@@ -83,7 +83,7 @@ Our lexer will be a function named `tokenize` that operates on readers. Its argu
   val tokenize : (char, 'a) StringCvt.reader -> (token, 'a) StringCvt.reader
 #+END_SRC
 
-There are only four kinds of tokens in the little s-expression language: left (opening) parentheses, right (closing) parentheses, atoms, and a period (for dotted tails or "improper lists").
+There are only four kinds of tokens in the little s-expression language: left (opening) parentheses, right (closing) parentheses, atoms, and a period (for dotted pairs and improper lists).
 
 #+NAME: token_datatype
 #+BEGIN_SRC sml
@@ -94,7 +94,7 @@ Three of the tokens are single characters, while atoms are the only token longer
 
 ## whitespace
 
-Stripping whitespace from streams, with readers, is something that nearly every character and string processing program will want to do, so there's a function provided in the StringCvt module for just this purpose: `skipWS`. It was helpful for me to understand how to implement this myself, just to get a better intuition for streams and readers:
+Stripping whitespace from streams, with readers, is something that nearly every character and string processing program will want to do, so there's a [[http://www.standardml.org/Basis/string-cvt.html#SIG:STRING_CVT.skipWS:VAL][function already provided]] in the StringCvt module for just this purpose: `skipWS`. It was helpful for me to understand how to implement this myself, just to get a better intuition for streams and readers:
 
 #+BEGIN_SRC sml
   fun skipWS rdr s =
@@ -195,7 +195,7 @@ Together, these functions complete the lexical analyzer. Using a little helper f
   val [LParen, Atom "foo", Dot, Atom "bar", RParen] = consume (tokenize string) "(foo . bar)"
 #+END_SRC
 
-That concludes this walkthrough. I hope it's helpful, and demystifies lexical analysis a little bit (convincing you that you [[http://stackoverflow.com/questions/17848207/making-a-lexical-analyzer/17848683#17848683][need neither ANTLR nor the Dragon book]] to write a little lexer) and also elaborates on the reader abstraction and how to make use of it. The code in this post, along with supporting boilerplate, is on [[https://github.com/spacemanaki/blorg/tree/master/posts][Github]], both as an Org-mode/Babel file and a tangled code-only `.sml` source file.
+That concludes this walkthrough. I hope it's helpful, and demystifies lexical analysis a little bit (convincing you that you [[http://stackoverflow.com/questions/17848207/making-a-lexical-analyzer/17848683#17848683][need neither ANTLR nor the Dragon book]] to write a little lexer) and also elaborates on the reader abstraction and how to make use of it. The code in this post, along with supporting boilerplate, is on [[https://github.com/spacemanaki/blorg/tree/master/posts][Github]], both as an Org-mode/Babel file and a tangled code-only `.sml` source file. If this whets your appetite, you could try implementing comments, which should be straightforward, or attach line and column number to the tokens, which is much harder. I may cover those in a later post, and later still cover the parser.
 
 #+BEGIN_SRC sml :exports none :noweb yes :tangle yes
   signature LEXER =
