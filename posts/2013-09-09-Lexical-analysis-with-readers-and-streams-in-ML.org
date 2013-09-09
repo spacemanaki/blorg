@@ -1,0 +1,230 @@
+#+TITLE: Lexical analysis with readers and streams in ML
+#+DATE: <2013-09-09 Mon>
+#+AUTHOR: aki
+#+EMAIL: aki@utahraptor
+#+OPTIONS: ':nil *:t -:t ::t <:t H:3 \n:nil ^:t arch:headline
+#+OPTIONS: author:t c:nil creator:comment d:(not LOGBOOK) date:t e:t
+#+OPTIONS: email:nil f:t inline:t num:t p:nil pri:nil stat:t tags:t
+#+OPTIONS: tasks:t tex:t timestamp:t toc:t todo:t |:t
+#+CREATOR: Emacs 24.3.1 (Org mode 8.0.3)
+#+DESCRIPTION:
+#+EXCLUDE_TAGS: noexport
+#+KEYWORDS:
+#+LANGUAGE: en
+#+SELECT_TAGS: export
+
+In my [[http://spacemanaki.com/blog/2013/08/31/Polymorphic-streams-in-ML/][last post]] I described an interesting abstraction for streams in Standard ML,  that I "discovered" after some trial and error. I say "discover" with scare quotes because I didn't exactly make a revolutionary contribution; the documentation in the [[http://www.standardml.org/Basis/][Basis]] describes this idea in detail and presents a few examples (see "Discussion" [[http://www.standardml.org/Basis/string-cvt.html][here]]). But it surprised me when I learned about it, so I thought it would be interesting to other people. Assuming that it is, I thought it might be helpful to walk through the small example I've been using as a proof of concept while experimenting with this code.
+
+Before publishing the previous post, I wrote a lexer and a parser for s-expressions, using readers and streams. I chose this because it's a very small language that's easy to parse with recursive descent, but it's also complicated enough that the code illustrates some of the issues you'd encounter writing larger parsers.
+
+## reader
+
+Recall that a reader is a peek function over a stream; it takes a stream and returns an element and new stream (wrapped in `'a option`). Concretely, the type of a reader, as defined in [[http://www.standardml.org/Basis/string-cvt.html][StringCvt]] is:
+
+#+BEGIN_SRC sml
+  type ('a,'b) reader = 'b -> ('a * 'b) option
+#+END_SRC
+
+#+RESULTS:
+: type ('a,'b) reader = 'b -> ('a * 'b) option
+
+...where `'b` is the type of stream and `'a` is the type of element in the stream. For instance, the type of reader for characters and strings is `string -> (char * string) option`.
+
+## tokens
+
+Lexical analysis is the process of breaking input into words or tokens. It can also be thought of as assembling a higher level object (tokens) from a lower level one (characters). Lexers usually also remove comments and normalize whitespace, as appropriate for the programming language in question.
+
+Our lexer will be a function named `tokenize` that operates on readers. Its argument is a character reader and it will return a token reader. The argument produces characters from some type of stream, and the returned reader will produce tokens from the same type of stream:
+
+#+NAME: tokenize_type
+#+BEGIN_SRC sml
+  val tokenize : (char, 'a) StringCvt.reader -> (token, 'a) StringCvt.reader
+#+END_SRC
+
+There are only four kinds of tokens in the little s-expression language: left (opening) parentheses, right (closing) parentheses, atoms, and a period (for dotted tails or "improper lists").
+
+#+NAME: token_datatype
+#+BEGIN_SRC sml
+  datatype token = LParen | RParen | Atom of string | Dot
+#+END_SRC
+
+Three of the tokens are single characters, while atoms are the only token longer than one character. The reader returned by `tokenize` will need to peek at least one character ahead in the stream to determine what to do. If that character is one of the single character tokens, all it needs to do is return that token along with the rest of the stream. If the character is some other non-whitespace character, it should read ahead until seeing some character not part of the atom, i.e. one of the other tokens or whitespace. Finally, it should just skip over the whitespace between tokens.
+
+## whitespace
+
+Stripping whitespace from streams, with readers, is something that nearly every character and string processing program will want to do, so there's a function provided in the StringCvt module for just this purpose: `skipWS`. It was helpful for me to understand how to implement this myself, just to get a better intuition for streams and readers:
+
+#+BEGIN_SRC sml
+  fun skipWS rdr s =
+      case rdr s of
+          NONE => s
+        | SOME (x, s') =>
+          if Char.isSpace x then
+             skipWS rdr s'
+          else s
+#+END_SRC
+
+#+RESULTS:
+: val skipWS = fn : ('a -> (char * 'a) option) -> 'a -> 'a
+
+This function is an example of a more general pattern for readers and streams: it's primarily a function on streams, but since it needs a particular reader to work with any particular stream, it takes a reader as the first argument, a stream as the second argument, and it returns a stream. It discards characters from the stream with the provided reader until it sees one that is not whitespace, returning the stream at that point. For example:
+
+#+BEGIN_SRC sml
+  - skipWS Reader.string "   foo" ;
+  val it = "foo" : string
+#+END_SRC
+
+Here, `Reader.string` is a string reader, i.e. a value of type `(char,string) StringCvt.reader`. The function `skipWS` will work with any type of character stream, whether backed by strings, substrings, lists, or files:
+
+#+BEGIN_SRC sml
+  - skipWS Reader.list [#" ",#" ",#" ",#"f",#"o",#"o"] ;
+  val it = [#"f",#"o",#"o"] : char list
+  - Substring.string (skipWS Reader.substring (Substring.full "   foo")) ;
+  val it = "foo" : string
+  
+  - let val out = TextIO.openOut "scratch"
+        val _ = TextIO.output (out, "   foo")
+        val _ = TextIO.flushOut out
+        val fromFile : string -> TextIO.StreamIO.instream =
+            TextIO.getInstream o TextIO.openIn
+        val inp = fromFile "scratch"
+  in
+     TextIO.StreamIO.inputAll (skipWS Reader.streamIO inp)
+  end ;
+  
+  val it = ("foo",-) : TextIO.StreamIO.vector * ?.TextIO.instream
+#+END_SRC
+
+Again, `Reader.list`, `Reader.substring`, `Reader.streamIO` are all just readers for various concrete stream types. You can see all of the `Reader` struct in the source for this post. I'm tempted to build up a small structure with general reader-based stream processing code in the vein of`skipWS`. But the implementations of the readers themselves are actually scattered throughout the Basis, for instance `Substring.getc` [[http://www.standardml.org/Basis/substring.html#SIG:SUBSTRING.getc:VAL][is actually a reader]]. If you're just messing around, you can use those.
+
+## tokenize
+
+With this under our belt, we can move on to writing the lexer proper:
+
+#+NAME: tokenize_impl
+#+BEGIN_SRC sml
+  fun tokenize rdr =
+      fn s =>
+         case rdr (StringCvt.skipWS rdr s) of
+             NONE => NONE
+           | SOME (#".", s') => SOME (Dot, s')
+           | SOME (#"(", s') => SOME (LParen, s')
+           | SOME (#")", s') => SOME (RParen, s')
+           | SOME (_, s') =>
+             case getAtom rdr (StringCvt.skipWS rdr s) of
+                 NONE => NONE
+               | SOME (atom, s') => SOME (Atom atom, s')
+#+END_SRC
+
+Remember that this function takes a reader, and returns another reader. Since readers are functions that operate on streams, `tokenize` returns another function, so the body is just a lambda expression (`fn s =>` on line 2).
+
+The first thing we do is apply the skip whitespace function from StringCvt to the stream, then apply the reader (`rdr (StringCvt.skipWS rdr s)` on line 3). This gives us either `NONE`, indicating the stream is empty, or `SOME` with the peeked character and the rest of the stream. Note that since we remove the leading whitespace, we know this character is not a space. We either return a single character token or call a helper function named `getAtom`, which takes a reader and a character stream, and returns the next atom in the stream as a string, and the rest of the character stream.
+
+This is another example of a common pattern, in this case for stream processing functions that take a reader and return another reader. The structure of the branches of the `case` expression is the important takeaway. If we try to peek into the first element of the stream and find nothing (i.e. `NONE`) then we should just return `NONE`, because the stream is empty. If there is an element in the stream, we transform that element somehow (in this case converting it to a token), and return the result of the transformation and the rest of the stream, wrapped in `SOME`.
+
+#+NAME: getAtom_impl
+#+BEGIN_SRC sml
+  fun getAtom rdr s =
+      let
+         fun return [] _ = NONE
+           | return acc s = SOME (String.implode (rev acc), s)
+  
+         fun getAtom' acc s =
+             case rdr s of
+                  NONE => return acc s
+                | SOME (#"(", rest) => return acc s
+                | SOME (#")", rest) => return acc s
+                | SOME (x, rest) => if Char.isSpace x then
+                                       return acc s
+                                    else getAtom' (x :: acc) rest
+      in
+         getAtom' [] s
+      end
+#+END_SRC
+
+The function `getAtom` reads characters from the stream until it sees either a parentheses or a space. This is closer to the `skipWS` function than to `tokenize`, in terms of the shape of the code. Instead of discarding characters as `skipWS` does, it collects them and returns them as a string, along with the rest of the stream.
+
+Together, these functions complete the lexical analyzer. Using a little helper function `consume` that repeatedly peeks from a stream and accumulates the elements into a list, we can run some ad-hoc tests:
+
+#+NAME: tests
+#+BEGIN_SRC sml
+  val [LParen, Atom "foo", RParen] = consume (tokenize string) "(foo)"
+  val [LParen, Atom "foo", Atom "bar", RParen] = consume (tokenize string) "(foo bar)"
+  val [LParen, Atom "foo", Dot, Atom "bar", RParen] = consume (tokenize string) "(foo . bar)"
+#+END_SRC
+
+That concludes this walkthrough. I hope it's helpful, and demystifies lexical analysis a little bit (convincing you that you [[http://stackoverflow.com/questions/17848207/making-a-lexical-analyzer/17848683#17848683][need neither ANTLR nor the Dragon book]] to write a little lexer) and also elaborates on the reader abstraction and how to make use of it. The code in this post, along with supporting boilerplate, is on [[https://github.com/spacemanaki/blorg/tree/master/posts][Github]], both as an Org-mode/Babel file and a tangled code-only `.sml` source file.
+
+#+BEGIN_SRC sml :exports none :noweb yes :tangle yes
+  signature LEXER =
+  sig
+     <<token_datatype>>
+     <<tokenize_type>>
+  end
+  structure Lexer : LEXER =
+  struct
+     <<token_datatype>>
+     (*
+      ,* Given a char reader and stream, try to extract a Scheme atom
+      ,* (string) from the stream, and return it with the rest of the stream
+      ,*)
+     <<getAtom_impl>>
+     (*
+      ,* Given a char reader, produce a token reader
+      ,*)
+     <<tokenize_impl>>
+  end
+  
+  structure Reader =
+  struct
+     val list : ('a, 'a list) StringCvt.reader =
+         fn [] => NONE
+       | (x::xs) => SOME (x, xs)
+     local
+        open String
+     in
+        val string : (char, string) StringCvt.reader =
+         fn "" => NONE
+          | s => SOME (sub (s, 0), substring (s, 1, size s - 1))
+     end
+     local
+        open Substring
+     in
+        val substring : (char, substring) StringCvt.reader = getc
+     end
+     
+     val streamIO : (char, TextIO.StreamIO.instream) StringCvt.reader =
+         TextIO.StreamIO.input1
+     (*
+      ,* Given a reader and a stream, consume the entire stream and return a
+      ,* list of the resulting elements
+      ,*)
+     fun consume (rdr : ('a, 'b) StringCvt.reader) s =
+         let
+            fun consume' acc s =
+                case rdr s of
+                    NONE => rev acc
+                  | SOME (x, s') => consume' (x::acc) s'
+         in
+            consume' [] s
+         end
+  end
+  
+  local
+     open String
+     open Lexer
+     open Reader
+  in
+     <<tests>>
+  end
+#+END_SRC
+
+#+RESULTS:
+: signature LEXER =
+:   sig
+:     datatype token = Atom of string | Dot | LParen | RParen
+:     val tokenize : (char,'a) StringCvt.reader -> (token,'a) StringCvt.reader
+:   end
+: structure Lexer : LEXER
+
+
