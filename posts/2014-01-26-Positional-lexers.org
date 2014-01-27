@@ -1,0 +1,161 @@
+#+TITLE: Positional-lexers
+#+DATE: <2014-01-26 Sun>
+#+AUTHOR: aki
+#+EMAIL: aki@utahraptor
+#+OPTIONS: ':nil *:t -:t ::t <:t H:3 \n:nil ^:t arch:headline
+#+OPTIONS: author:t c:nil creator:comment d:(not LOGBOOK) date:t e:t
+#+OPTIONS: email:nil f:t inline:t num:t p:nil pri:nil stat:t tags:t
+#+OPTIONS: tasks:t tex:t timestamp:t toc:t todo:t |:t
+#+CREATOR: Emacs 24.3.1 (Org mode 8.0.3)
+#+DESCRIPTION:
+#+EXCLUDE_TAGS: noexport
+#+KEYWORDS:
+#+LANGUAGE: en
+#+SELECT_TAGS: export
+
+** ... in ML, of course
+
+In my [[http://spacemanaki.com/blog/2014/01/19/Positional-Streams/][last post]], for some reason I decided to drop the "in ML" part of the title, unlike [[http://spacemanaki.com/blog/2013/09/09/Lexical-analysis-with-readers-and-streams-in-ML/][previous]] [[http://spacemanaki.com/blog/2013/08/31/Polymorphic-streams-in-ML/][posts]]. I'm not sure what I think about this, since a lot of this blogging and code is pretty ML specific (and I am awfully fond of ML), but at the same time I'd like to think these posts are generally useful. For now, I guess "in ML" will just be implicit, until I start posting about work in another language.
+
+** positional lexical analyzers
+
+Moving on, I wanted to address something I neglected to cover in my last post, which is the process of turning a positional character reader into a lexical analyzer that produces tokens along with their position from a stream. This is the second step, after positional character readers, to handling and reporting syntactic errors.
+
+** what's the point of all this
+
+I feel like I've been steaming along with this code and blog without a lot of higher level commentary, like why am I bothering with this stuff or what's the big idea. So here's a brief rundown of where I want to go in the next dozen blog posts or thereabouts.
+
+Over the summer I wrote most of a front end for an ML compiler, nicknamed [[https://github.com/spacemanaki/maml][maml]]. It consists of a lexer, parser, type checker (with Hindley-Milner type inference), and a naive pattern match compiler. Eventually, I hope it will become a full blown implementation of a mini ML-like language, not all the way to a real Standard ML but a bit more than a toy interpreter. One of the goals of this project has always been to explore several aspects of compiler construction very deeply, and one of those that I wanted to understand better was parsing.
+
+The parser in maml is a hand-written recursive descent parser (with a Pratt-style expression parser). Right now it does a poor job reporting syntax errors, and the same goes for the type checker reporting type errors. Exploring how to do a good job of handling and reporting errors is where I am right now. Part of that involved refactoring the front end to deal in streams instead of the naive approach of handling lists, and so that's why I've focused on streams in these posts so much. Handling and reporting errors during parsing will be the next post I write, after this one. Eventually I'll find the time to return to maml and impart what I've found into a refactor of the parser.
+
+** back to the lexer
+
+Ok, with that out of the way, I hope that the thread is clearer and that the end goals better defined. Recall that previously we had a character reader (don't know what readers are? refer all the way back to [[http://spacemanaki.com/blog/2013/08/31/Polymorphic-streams-in-ML/][this post]]) that produced characters with attached column and line numbers:
+
+#+BEGIN_SRC sml
+  val reader: (char * Pos.t,'a * Pos.t) StringCvt.reader = (* ... *)
+#+END_SRC
+
+Where the type `Pos.t` is:
+
+#+BEGIN_SRC sml
+  type t = {col: int, line: int}
+#+END_SRC
+
+The `Pos` [[https://github.com/spacemanaki/persimmon/blob/master/pos.sml][module]] defines small suite of related functions for operating on values of this position type. The plan is to write a function that produces a token reader from a character reader, that attaches line and column number to each token in the stream. Given a suitable token type `Lexer.t`, we want:
+
+#+BEGIN_SRC sml
+  val makeLexer: (char * Pos.t,'a * Pos.t) StringCvt.reader -> (Lexer.t * Pos.t,'a * Pos.t) = (* ... *)
+#+END_SRC
+
+That is to say, the lexer function returned should produce positional tokens from a positional stream of type `'a`.
+
+** defining a token type
+
+Since it's a good example, we'll steal the Scheme token type I used in a [[http://spacemanaki.com/blog/2013/09/09/Lexical-analysis-with-readers-and-streams-in-ML/][previous post]] on lexers and streams. Here it is again:
+
+#+BEGIN_SRC sml
+  datatype token = LParen | RParen | Atom of string
+#+END_SRC
+
+I've removed the `Dot` constructor, for reasons that may become clear in a future post. For now just trust me that it complicates thing in parsing, and I want to use this example as the foundation for posts on parsing.
+
+Values of this type will need to carry additional values, line and column numbers, or positions. There are two ways you could do this. One way would be for your lexer to produce pairs of token and position, rather than just tokens. The other is to modify this type so that each constructor accepts another argument, the position. During lexing, this is less consequential, but it turns out that in parsing the second is easier, I think. It does turn out that this problem isn't [[http://lambda-the-ultimate.org/node/4170][entirely]] [[http://blog.ezyang.com/2013/05/the-ast-typing-problem/][trivial]].
+
+Since we have existing code that treats positional readers as those that produce pairs of element and position, for the lexer at least we'll go with this. The parser will likely use a different approach.
+
+** the actual lexer
+
+The `makeLexer` function isn't that difficult to write. It doesn't differ much from the previous lexer (although keep in mind we aren't dealing with dotted pairs any more), and the biggest change is really just the bookkeeping of using the right position at the type of token construction:
+
+#+BEGIN_SRC sml
+  fun makeLexer (rdr : (char * Pos.t, 'a) reader) : (token * Pos.t, 'a) reader =
+      let
+         fun skipWS rdr s =
+             case rdr s of
+                 NONE => s
+               | SOME ((#" ", _), s') => skipWS rdr s'
+               | SOME ((_   , _), s') => s
+      in
+         fn s =>
+            case rdr (skipWS rdr s) of
+                NONE => NONE
+              | SOME ((#"(", p), s') => SOME ((LParen, p), s')
+              | SOME ((#")", p), s') => SOME ((RParen, p), s')
+              | SOME ((_, p), s') =>
+                case getAtom (rdr, skipWS rdr s) of
+                    NONE => NONE
+                  | SOME (atom, s') => SOME ((Atom atom, p), s')
+      end
+#+END_SRC
+
+The function `getAtom` that extracts an atom as a string from the stream is largely unchanged, but there is again some extra bookkeeping, in this case updating the pattern matching to just ignore the position that's attached to every character.
+
+#+BEGIN_SRC sml
+  fun getAtom (rdr : ((char * Pos.t), 'b) reader, s : 'b) : (string * 'b) option =
+      let
+         fun done [] _ = NONE
+           | done acc s = SOME (String.implode (rev acc), s)
+
+         fun getAtom' acc s =
+             case rdr s of
+                  NONE => done acc s
+                | SOME ((#"(", _), rest) => done acc s
+                | SOME ((#")", _), rest) => done acc s
+                | SOME ((x,    _), rest) =>
+                  if Char.isSpace x then
+                     done acc s
+                  else getAtom' (x :: acc) rest
+      in
+         getAtom' [] s
+      end
+#+END_SRC
+
+Along with the supporing infrastructure, we can now use this code to tokenize any stream (with a suitable reader implementation) into tokens with character position attached to them. For instance, given a regular character reader that operates on strings (this is inefficient, but fine for our purposes):
+
+#+BEGIN_SRC sml
+  fun getc1 "" = NONE
+    | getc1 s  = SOME (String.sub (s, 0), String.substring (s, 1, size s - 1))
+  
+  val SOME (#"f", "oo") = getc1 "foo"
+#+END_SRC
+
+#+RESULTS:
+: val getc1 = fn : string -> (char * string) option
+
+And a positional reader constructed from our string reader:
+
+#+BEGIN_SRC sml
+  val getc2 = Pos.reader getc1
+  
+  val SOME ((#"f", p), ("oo", p')) = getc2 (Pos.stream "foo")
+  
+  val 1 = Pos.line p
+  val 0 = Pos.col p
+  
+  val 1 = Pos.line p'
+  val 1 = Pos.col p'
+#+END_SRC
+
+#+RESULTS:
+: val getc2 = fn : (char * Pos.t,string * Pos.t) reader
+: val p = - : Pos.t
+: val p' = - : Pos.t
+
+We can finally construct a lexer, that attaches line and column numbers to tokens that it produces. This is then used by the parser to report errors, as well as attach the position of various syntax elements to the abstract syntax tree. I'll try to cover that in my next post.
+
+#+BEGIN_SRC sml
+  val lex   = Lexer.makeLexer getc2
+  
+  val SOME ((LParen, p), ("foo)", p')) = lex (Pos.stream "(foo)")
+  val 1 = Pos.line p
+  val 0 = Pos.col p
+#+END_SRC
+
+#+RESULTS:
+: val lex = fn : (Lexer.token * Pos.t,string * Pos.t) reader
+: val LParen = LParen : Lexer.token
+: val p = - : Pos.t
+: val p' = - : Pos.t
+
