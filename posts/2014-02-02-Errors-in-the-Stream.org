@@ -1,0 +1,143 @@
+#+TITLE: Errors in the Stream
+#+DATE: <2014-02-02 Sun>
+#+AUTHOR: aki
+#+EMAIL: aki@utahraptor
+#+OPTIONS: ':nil *:t -:t ::t <:t H:3 \n:nil ^:t arch:headline
+#+OPTIONS: author:t c:nil creator:comment d:(not LOGBOOK) date:t e:t
+#+OPTIONS: email:nil f:t inline:t num:t p:nil pri:nil stat:t tags:t
+#+OPTIONS: tasks:t tex:t timestamp:t toc:t todo:t |:t
+#+CREATOR: Emacs 24.3.1 (Org mode 8.0.3)
+#+DESCRIPTION:
+#+EXCLUDE_TAGS: noexport
+#+KEYWORDS:
+#+LANGUAGE: en
+#+SELECT_TAGS: export
+
+** Or, handling syntax errors without exceptions
+
+I didn't always find parsing interesting. That might be a surprise judging from the [[http://spacemanaki.com/blog/archives/][past half dozen]] blog posts I've written, but I got interested in compilers and programming langauge implementation via various Lisp and Scheme books, like [[http://spacemanaki.com/blog/2010/10/23/The-Wizard-Book/][SICP]] and [[http://spacemanaki.com/blog/2010/07/05/The-Little-Schemer/][The Little Schemer]], so I quickly adopted the "parsing is boring!" mantra that is espoused by [[http://cs.brown.edu/courses/cs173/2012/book/Everything__We_Will_Say__About_Parsing.html][some authors]].
+
+However, parsing is part of every compiler (even Lisp compilers), and syntax is part of every programming language, so ignoring it forever would never do. I'm enchanted with how programming languages work in part because it feels like peeling back the curtain and finding out that there is no magic, just code. I couldn't treat parsers as a black box for very long.
+
+Parsing is more than taking a stream of characters and producing an abstract syntax tree; that's just the bare minimum. Parsers must be usable, by humans who are feeding them source code, and by backends of compilers and interpreters. This means proper error handling, and treating errors as first class citizens. This makes it a much more interesting problem.
+
+** exceptions in ML
+
+Standard ML (and OCaml, and the "platonic ML") has an exception mechanism which should be familiar to many programmers who have used almost any other language with exceptions. In some ways, exceptions are fundamental to ML, since there are certain obvious cases (taking the head of an empty list, dividing by zero, non-exhaustive matches) where the runtime must raise an error of some kind and providing for handling them makes sense. Exceptions are interesting in a [[http://mlton.org/GenerativeException][few]] [[http://mlton.org/UniversalType][different]] theoretical ways involving types, but they're perfectly usable by the working programmer too.
+
+Over use (or frankly even any use) of exceptions is somewhat bad practice in my humble opinion. For the same reason ML programmers would rather opt for the classic `'a option` type over pervasive nullable pointers, it seems to me that embedding all possible values in the type of an expression and avoiding exceptions altogether would lead to more robust code. There are other uses of exceptions beyond error handling, for non-local control flow, but I doubt anyone would seriously advocate it's good style. Like mutable state, I think using exceptions in ML programs is more of a patch over an incomplete design than a good practice. I'm sure there are exceptions to this rule, but I don't think parsing is one of them.
+
+** exceptions in parsing
+
+Let's talk about a concrete example, the parser I plan to write for s-expressions. Without writing the implementation, here's the type of a parser "factory":
+
+#+BEGIN_SRC sml
+  val makeParser : (token, 'a) reader -> (sexpr, 'a) reader = (* ... *)
+#+END_SRC
+
+Like the lexical analyzer factory, this function takes a token reader and returns a parser, which is a new reader that produces abstract syntax trees (`sexpr`s) from the stream. Recall that readers return a value of type `('a, 'b) option`, in other words either a `SOME (element, stream)` or `NONE`. In the case of I/O or general stream processing code, the `NONE` value is simple: it just signifies that the stream is empty or the file handle has reached the EOF. (If this paragraph was incomprehensible to you, start [[http://spacemanaki.com/blog/2013/08/31/Polymorphic-streams-in-ML/][here]].)
+
+As for the parser, what should happen in the case of a syntax error? Success is easy enough to understand, the result will be `SOME (ast, stream)` but failure is more complicated than just `NONE`. Reaching the end of the stream isn't an exceptional circumstance, and shouldn't represent an error (reaching the end EARLY is an error, but that just underlines my point, that `NONE` clobbers any granularity we might want). Ideally the parser would report something more interesting than just the existence of an error, but also an error message and where it occurred. This is necessary to achieve my goal of:
+
+#+BEGIN_SRC scheme
+  Syntax error on line 1 col 20:
+  (let ((x 1) (y 2)) (
+  ~~~~~~~~~~~~~~~~~~~~^ unexpected EOF
+#+END_SRC
+
+** specializing `either`
+
+There is an alternative to `'a option` which isn't part of the Standard ML basis but is easy to define and should be familiar to Haskell programmers: `('a, 'b) either`.
+
+#+BEGIN_SRC sml
+  type ('a, 'b) either = Left of 'a | Right of 'b
+#+END_SRC
+
+This is basically a generalized union for types. Given two types `'a` and `'b`, `either` constructs a type consisting of their union or sum. It's useful when you want to return an optional value but want the `NONE` variant to carry some extra data. You can imagine instead of `Left` and `Right` using:
+
+#+BEGIN_SRC sml
+  type ('a, 'b) either = Success of 'a | Error of 'b
+#+END_SRC
+
+In our case, this is close but not quite enough. There are actually two possibilities other than success when trying to parse an ast from a stream: errors but also simply reaching the end of the stream. Reaching the end of a stream isn't actually a error condition: it just means I've finished parsing a file or some other I/O stream (like a REPL being terminated with `^D`). So it turns out that the following ternary type is better suited to parsing:
+
+#+BEGIN_SRC sml
+  type ('a, 'b) result = Success of 'a * 'b | Error of string * 'b | EOF
+#+END_SRC
+
+I've further specified the type to return a pair of resulting element and rest of stream in the case of success, and return a pair of error message and stream in the case of errors. Here are a few example values of this type for clarification:
+
+#+BEGIN_SRC sml
+  val Success (ASTNode (x, y, z), stream') = parse stream
+  val Error ("Expected END but got IF", stream') = parse stream
+#+END_SRC
+
+And here's a little example function that consumes values of this type:
+
+#+BEGIN_SRC sml
+  fun repl s =
+      case parse s of
+          Success (ast, s') => (print (eval ast)
+                              ; repl s')
+        | Error (msg, s')   => print (error (msg, s'))
+        | EOF               => ()
+#+END_SRC
+
+** an error-reporting parser for s-expressions
+
+Our parser will take a stream and return an ML datatype representing s-expressions. This type is a simplified version of s-expressions that does not include "dotted pairs" because dotted pairs complicates the parser quite a bit without making it much more interesting.
+
+#+BEGIN_SRC sml
+  datatype 'a sexpr = Atom of 'a * string | List of 'a * 'a sexpr list
+#+END_SRC
+
+The `sexpr` type is polymorphic leaving room for any data to be attached to each and every node in the abstract syntax tree. In our case, this will simply be line and column number (`Pos.t`) but you can imagine in a real compiler you might have more interesting data to attach, like scope or type information.
+
+Finally, here is the complete source for the parser factory function, which takes a lexer and returns a parser:
+
+#+BEGIN_SRC sml
+  fun makeParser (rdr : (Lexer.token * Pos.t, 'a * Pos.t) reader) : (Pos.t sexpr, 'a * Pos.t) parser =
+      let
+         fun sexpr s =
+              case rdr s of
+                  SOME ((Lexer.Atom a, p), s') => Success (Atom (p, a), s')
+                | SOME ((Lexer.LParen, p), s') => sexprList p s' []
+                | SOME ((Lexer.RParen, _), _)  => Error ("unexpected )", s)
+                | NONE => EOF
+  
+         and sexprList p s acc =
+              case rdr s of
+                  NONE                         => Error ("unexpected EOF", s)
+                | SOME ((Lexer.RParen, _), s') => Success (List (p, rev acc), s')
+                | SOME _                       =>
+                  case sexpr s of
+                      Success (x, s') => sexprList p s' (x :: acc)
+                    | other           => other
+      in
+         sexpr
+      end
+#+END_SRC
+
+This function follows from the s-expression grammar:
+
+#+BEGIN_SRC
+  sexpr     -> <atom>
+            -> ( sexprList )
+  sexprList -> .
+            -> sexpr sexprList
+#+END_SRC
+
+The most interesting bit of this is probably the recursive call to `sexpr` on line XXX. Here, I recursively parse an s-expression appearing inside a list and unpack the result only if it was successfully parsed, otherwise I return the result which is likely an error; I don't believe that this call could ever produce the EOF value but I haven't actually proved it or tested the code heavily to be sure.
+
+#+BEGIN_SRC sml
+  local
+     open Parser
+  in
+     val Success (List ({line=1, col=0},
+                        [Atom ({line=1, col=1}, "foo"),
+                         List ({line=2, col=0},
+                               [Atom ({line=2, col=1}, "bar")])]),
+                  _) =
+         parse (Pos.stream "(foo\n(bar))")
+  end
+#+END_SRC
