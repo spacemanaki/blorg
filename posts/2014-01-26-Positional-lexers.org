@@ -1,4 +1,4 @@
-#+TITLE: Positional-lexers
+#+TITLE: Positional Lexers
 #+DATE: <2014-01-26 Sun>
 #+AUTHOR: aki
 #+EMAIL: aki@utahraptor
@@ -15,23 +15,31 @@
 
 ** ... in ML, of course
 
-In my [[http://spacemanaki.com/blog/2014/01/19/Positional-Streams/][last post]], for some reason I decided to drop the "in ML" part of the title, unlike [[http://spacemanaki.com/blog/2013/09/09/Lexical-analysis-with-readers-and-streams-in-ML/][previous]] [[http://spacemanaki.com/blog/2013/08/31/Polymorphic-streams-in-ML/][posts]]. I'm not sure what I think about this, since a lot of this blogging and code is pretty ML specific (and I am awfully fond of ML), but at the same time I'd like to think these posts are generally useful. For now, I guess "in ML" will just be implicit, until I start posting about work in another language.
+In my [[http://spacemanaki.com/blog/2014/01/19/Positional-Streams/][last post]], for some reason I decided to drop "in ML" from the title, unlike [[http://spacemanaki.com/blog/2013/09/09/Lexical-analysis-with-readers-and-streams-in-ML/][previous]] [[http://spacemanaki.com/blog/2013/08/31/Polymorphic-streams-in-ML/][posts]]. I'm not sure why I did that, or whether I like it, since a lot of these blog posts and accompanying code is kind of ML specific (and I am awfully fond of ML), but at the same time I'd like to think these posts are more generally useful to non-ML programmers interested in amateur compiler hacking. For now, I guess "in ML" will just be implicit, until I start posting about work in another language.
 
 ** positional lexical analyzers
 
-Moving on, I wanted to address something I neglected to cover in my last post, which is the process of turning a positional character reader into a lexical analyzer that produces tokens along with their position from a stream. This is the second step, after positional character readers, to handling and reporting syntactic errors.
+Moving on, I wanted to address something I neglected to cover in my last post, which is the process of turning a positional character reader into a lexical analyzer that produces a stream of tokens with their position in file. This is the second prerequisite after positional character readers to actually handling and reporting syntactic errors (and other errors, both static and dynamic).
 
 ** what's the point of all this
 
-I feel like I've been steaming along with this code and blog without a lot of higher level commentary, like why am I bothering with this stuff or what's the big idea. So here's a brief rundown of where I want to go in the next dozen blog posts or thereabouts.
+I've been steaming along with these compiler front-end posts without a lot of higher level commentary, for instance never addressing *why* I might be bothering with any of this stuff, or where the hell I'm going with it all. So here's a brief rundown of my motivations and where I want to go in the next half dozen or so blog posts.
 
-Over the summer I wrote most of a front end for an ML compiler, nicknamed [[https://github.com/spacemanaki/maml][maml]]. It consists of a lexer, parser, type checker (with Hindley-Milner type inference), and a naive pattern match compiler. Eventually, I hope it will become a full blown implementation of a mini ML-like language, not all the way to a real Standard ML but a bit more than a toy interpreter. One of the goals of this project has always been to explore several aspects of compiler construction very deeply, and one of those that I wanted to understand better was parsing.
+Last summer (while on a mini-sabattical at [[https://www.hackerschool.com/][Hacker School]]) I wrote most of a front end for an ML compiler, nicknamed [[https://github.com/spacemanaki/maml][maml]]. It consists of a lexer, parser, type checker (with Hindley-Milner type inference), and a naive pattern match compiler. Eventually, I hope it will become a full blown implementation of a mini ML-like language, not all the way to a real Standard ML but a bit more than a toy interpreter. One of my goals for this project was always to explore aspects of compiler construction I've avoided, and one of those that I wanted to understand better was parsing.
 
-The parser in maml is a hand-written recursive descent parser (with a Pratt-style expression parser). Right now it does a poor job reporting syntax errors, and the same goes for the type checker reporting type errors. Exploring how to do a good job of handling and reporting errors is where I am right now. Part of that involved refactoring the front end to deal in streams instead of the naive approach of handling lists, and so that's why I've focused on streams in these posts so much. Handling and reporting errors during parsing will be the next post I write, after this one. Eventually I'll find the time to return to maml and impart what I've found into a refactor of the parser.
+The parser in maml is a hand-written recursive descent parser (with an embedded Pratt-style expression parser, which deserves its own post to be honest). Right now the parser does a poor job reporting syntax errors, and the same goes for the type checker reporting type errors (and for that matter the pattern match compiler reporting non-exhaustive match warnings). Exploring how to do a good job of handling and reporting errors is where I am right now. Part of that involved refactoring the front end to deal in streams instead of the naive approach of handling lists, and so that's why I've focused on streams in these posts so much. Handling and reporting errors during parsing will be the next post I write, after this one. Eventually I'll find the time to return to maml and impart what I've found into a refactor of the parser, and eventually the type checker.
+
+To put it succinctly, this is what I want my parser to do when encountering bad input:
+
+#+BEGIN_SRC sml
+  Syntax error:
+  val x = if y then z
+  ~~~~~~~~~~~~~~~~~~~~^ expected 'else'
+#+END_SRC
 
 ** back to the lexer
 
-Ok, with that out of the way, I hope that the thread is clearer and that the end goals better defined. Recall that previously we had a character reader (don't know what readers are? refer all the way back to [[http://spacemanaki.com/blog/2013/08/31/Polymorphic-streams-in-ML/][this post]]) that produced characters with attached column and line numbers:
+Ok, with that out of the way, I hope that the thread is clearer and that the end goals better defined. Recall that [[http://spacemanaki.com/blog/2014/01/19/Positional-Streams/][previously]] we had a character reader (refer back to [[http://spacemanaki.com/blog/2013/08/31/Polymorphic-streams-in-ML/][this post]] for background on readers) that produced characters with attached column and line numbers:
 
 #+BEGIN_SRC sml
   val reader: (char * Pos.t,'a * Pos.t) StringCvt.reader = (* ... *)
@@ -43,31 +51,31 @@ Where the type `Pos.t` is:
   type t = {col: int, line: int}
 #+END_SRC
 
-The `Pos` [[https://github.com/spacemanaki/persimmon/blob/master/pos.sml][module]] defines small suite of related functions for operating on values of this position type. The plan is to write a function that produces a token reader from a character reader, that attaches line and column number to each token in the stream. Given a suitable token type `Lexer.t`, we want:
+The `Pos` [[https://github.com/spacemanaki/persimmon/blob/master/pos.sml][module]] defines a small suite of related functions for operating on values of this position type. The plan is to write a function that, given a positional character reader, returns a token reader that attaches line and column numbers to each token in the stream. For a suitable token type `Lexer.t`, we want:
 
 #+BEGIN_SRC sml
   val makeLexer: (char * Pos.t,'a * Pos.t) StringCvt.reader -> (Lexer.t * Pos.t,'a * Pos.t) = (* ... *)
 #+END_SRC
 
-That is to say, the lexer function returned should produce positional tokens from a positional stream of type `'a`.
+That is to say, the function returned produces positional tokens from a positional stream of type `'a`.
 
 ** defining a token type
 
-Since it's a good example, we'll steal the Scheme token type I used in a [[http://spacemanaki.com/blog/2013/09/09/Lexical-analysis-with-readers-and-streams-in-ML/][previous post]] on lexers and streams. Here it is again:
+Since it's a nice small example, we'll steal the Scheme token type I used in a [[http://spacemanaki.com/blog/2013/09/09/Lexical-analysis-with-readers-and-streams-in-ML/][previous post]] on lexers and streams. Here it is again:
 
 #+BEGIN_SRC sml
   datatype token = LParen | RParen | Atom of string
 #+END_SRC
 
-I've removed the `Dot` constructor, for reasons that may become clear in a future post. For now just trust me that it complicates thing in parsing, and I want to use this example as the foundation for posts on parsing.
+I've removed the `Dot` constructor, for reasons that may become clear in a future post. For now trust me that it turns out to unnecessarily complicate things in parsing, and I want to use this example as the foundation for posts on parsing.
 
-Values of this type will need to carry additional values, line and column numbers, or positions. There are two ways you could do this. One way would be for your lexer to produce pairs of token and position, rather than just tokens. The other is to modify this type so that each constructor accepts another argument, the position. During lexing, this is less consequential, but it turns out that in parsing the second is easier, I think. It does turn out that this problem isn't [[http://lambda-the-ultimate.org/node/4170][entirely]] [[http://blog.ezyang.com/2013/05/the-ast-typing-problem/][trivial]].
+Specific values of this type will need to carry additional data: line and column numbers, or positions. There are two ways you could do this. One way would be for your lexer to produce pairs of token and position, rather than just tokens. The other is to modify this type so that each constructor accepts another argument, the position. During lexing, this matters less, but it turns out that in parsing the second is much easier, I think. This problem in general isn't [[http://lambda-the-ultimate.org/node/4170][entirely]] [[http://blog.ezyang.com/2013/05/the-ast-typing-problem/][trivial]].
 
-Since we have existing code that treats positional readers as those that produce pairs of element and position, for the lexer at least we'll go with this. The parser will likely use a different approach.
+Since we have existing code that treats positional readers as those that produce pairs of element and position, for the lexer we'll go with this. The parser will likely use the other approach.
 
 ** the actual lexer
 
-The `makeLexer` function isn't that difficult to write. It doesn't differ much from the previous lexer (although keep in mind we aren't dealing with dotted pairs any more), and the biggest change is really just the bookkeeping of using the right position at the type of token construction:
+The `makeLexer` function isn't that difficult to write. It doesn't differ much from the previous lexer (although keep in mind we aren't dealing with dotted pairs any more), and the biggest change is really just the bookkeeping of using the right position at the time of token construction:
 
 #+BEGIN_SRC sml
   fun makeLexer (rdr : (char * Pos.t, 'a) reader) : (token * Pos.t, 'a) reader =
