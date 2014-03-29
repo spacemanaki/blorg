@@ -15,15 +15,15 @@
 
 ** Or, handling syntax errors without exceptions
 
-I didn't always find parsing interesting. That might be a surprise judging from the [[http://spacemanaki.com/blog/archives/][past half dozen]] blog posts I've written, but I got interested in compilers and programming langauge implementation via various Lisp and Scheme books, like [[http://spacemanaki.com/blog/2010/10/23/The-Wizard-Book/][SICP]] and [[http://spacemanaki.com/blog/2010/07/05/The-Little-Schemer/][The Little Schemer]], so I quickly adopted the "parsing is boring!" mantra that is espoused by [[http://cs.brown.edu/courses/cs173/2012/book/Everything__We_Will_Say__About_Parsing.html][some authors]].
+I didn't always find parsing interesting. That might be a surprise judging from the [[http://spacemanaki.com/blog/archives/][past half dozen]] blog posts I've written, but I got interested in compilers and programming langauge implementation through various Lisp and Scheme books, like [[http://spacemanaki.com/blog/2010/10/23/The-Wizard-Book/][SICP]] and [[http://spacemanaki.com/blog/2010/07/05/The-Little-Schemer/][The Little Schemer]], so I quickly adopted the "parsing is boring!" mantra that is espoused by [[http://cs.brown.edu/courses/cs173/2012/book/Everything__We_Will_Say__About_Parsing.html][some authors]].
 
-However, parsing is part of every compiler (even Lisp compilers), and syntax is part of every programming language, so ignoring it forever would never do. I'm enchanted with how programming languages work in part because it feels like peeling back the curtain and finding out that there is no magic, just code. I couldn't treat parsers as a black box for very long.
+However, parsing is part of every compiler (even Lisp compilers), and syntax is part of every programming language, so I couldn't ignore it forever. I'm enchanted with how programming languages work in part because it feels like peeling back the curtain and finding out that there is no magic, just code. I couldn't treat parsers as a black box for very long.
 
-Parsing is more than taking a stream of characters and producing an abstract syntax tree; that's just the bare minimum. Parsers must be usable, by humans who are feeding them source code, and by backends of compilers and interpreters. This means proper error handling, and treating errors as first class citizens. This makes it a much more interesting problem.
+Parsing is more than taking a stream of characters and producing an abstract syntax tree; that's just the bare minimum. Parsers must be usable, by humans who are feeding them source code, and by backends of compilers and interpreters. This means proper error handling, and treating errors as first class citizens. There are a lot of other things that makes parsers interesting (well they ARE monads after all...), but error handling is a subtle art that is often swept under the rug.
 
 ** exceptions in ML
 
-Standard ML (and OCaml, and the "platonic ML") has an exception mechanism which should be familiar to many programmers who have used almost any other language with exceptions. In some ways, exceptions are fundamental to ML, since there are certain obvious cases (taking the head of an empty list, dividing by zero, non-exhaustive matches) where the runtime must raise an error of some kind and providing for handling them makes sense. Exceptions are interesting in a [[http://mlton.org/GenerativeException][few]] [[http://mlton.org/UniversalType][different]] theoretical ways involving types, but they're perfectly usable by the working programmer too.
+Standard ML (and OCaml, and the "platonic ML") has an exception mechanism which should be familiar to many programmers who have used almost any other language with exceptions. In some ways, exceptions are fundamental to ML, since there are certain obvious cases (taking the head of an empty list, dividing by zero, non-exhaustive matches) where the runtime must raise an error, and allowing the programmer handle them makes sense. Exceptions are interesting in a [[http://mlton.org/GenerativeException][few]] [[http://mlton.org/UniversalType][different]] theoretical ways involving types, but they're perfectly usable by the working programmer too.
 
 Over use (or frankly even any use) of exceptions is somewhat bad practice in my humble opinion. For the same reason ML programmers would rather opt for the classic `'a option` type over pervasive nullable pointers, it seems to me that embedding all possible values in the type of an expression and avoiding exceptions altogether would lead to more robust code. There are other uses of exceptions beyond error handling, for non-local control flow, but I doubt anyone would seriously advocate it's good style. Like mutable state, I think using exceptions in ML programs is more of a patch over an incomplete design than a good practice. I'm sure there are exceptions to this rule, but I don't think parsing is one of them.
 
@@ -44,6 +44,8 @@ As for the parser, what should happen in the case of a syntax error? Success is 
   (let ((x 1) (y 2)) (
   ~~~~~~~~~~~~~~~~~~~~^ unexpected EOF
 #+END_SRC
+
+What if we tried to use exceptions anyway? You could try, knowing it was a crutch and only a stepping stone to refactoring the code into a more complete, elegant design. But you run into an interesting problem pretty quickly. Look at the type of the parser factory above, polymorphic in the type of the stream. If we want to throw an exception that includes the stream itself, so that we can print an error message pointing at concrete syntax like the one above, the exception would have to be polymorphic too. But that type variable is scoped to the function, and Standard ML doesn't allow you to define a polymorphic exception at the top-level.
 
 ** specializing `either`
 
@@ -104,7 +106,7 @@ Finally, here is the complete source for the parser factory function, which take
                 | SOME ((Lexer.LParen, p), s') => sexprList p s' []
                 | SOME ((Lexer.RParen, _), _)  => Error ("unexpected )", s)
                 | NONE => EOF
-  
+
          and sexprList p s acc =
               case rdr s of
                   NONE                         => Error ("unexpected EOF", s)
@@ -127,7 +129,7 @@ This function follows from the s-expression grammar:
             -> sexpr sexprList
 #+END_SRC
 
-The most interesting bit of this is probably the recursive call to `sexpr` on line XXX. Here, I recursively parse an s-expression appearing inside a list and unpack the result only if it was successfully parsed, otherwise I return the result which is likely an error; I don't believe that this call could ever produce the EOF value but I haven't actually proved it or tested the code heavily to be sure.
+The most interesting bit of this is probably the recursive call to `sexpr` on line 15. Here, I recursively parse an s-expression appearing inside a list and unpack the result only if it was successfully parsed, otherwise I return the result which is likely an error; I don't believe that this call could ever produce the EOF value but I haven't actually proved it or tested the code heavily to be sure.
 
 #+BEGIN_SRC sml
   local
@@ -141,3 +143,55 @@ The most interesting bit of this is probably the recursive call to `sexpr` on li
          parse (Pos.stream "(foo\n(bar))")
   end
 #+END_SRC
+
+Unfortunately, s-expressions are so simple there are only really two interesting errors: unexpected end of streams, and unexpected closing parentheses.
+
+#+BEGIN_SRC sml
+  - parse (Pos.stream "(foo (bar") ;
+  val it = Error ("unexpected EOF",("",{col=9,line=1}))
+    : (Pos.t Parser.sexpr,string * Pos.t) Parser.result
+  - parse (Pos.stream ")") ;
+  val it = Error ("unexpected )",(")",{col=0,line=1}))
+    : (Pos.t Parser.sexpr,string * Pos.t) Parser.result
+#+END_SRC
+
+However, since every node in the abstract syntax tree is annotated with a position in concrete syntax, an interpreter or compiler that consumed the tree could use that position for better runtime error reporting. Hopefully you can also imagine a type checker doing the same for type errors.
+
+Printing a nice error message with a little caret to the offending character requires a little extra work. Since the stream at the point of the error is actually the rest of the stream, and doesn't include any way to backtrack. For a majority of cases, printing the line number, then the line, and then the error message and column number would probably suffice. Getting back to the start of the offending line is the problem. It's enough to just keep the stream at the beginning of the current line around until the reader reaches a new line:
+
+#+BEGIN_SRC sml
+  fun reader rdr =
+      fn (s, t, p) =>
+         case rdr t of
+             NONE            => NONE
+           | SOME (#"\n", u) => SOME ((#"\n", p), (u, u, incrLine p))
+           | SOME (x,     u) => SOME ((x,     p), (s, u, incrCol  p))
+#+END_SRC
+
+This is a function that takes a character reader (`rdr`) and returns a new reader that operates on a "richer" positional stream, one that also includes the stream state at the start of the current line. The anonymous function return take a triple of `s`, `t`, `p`, where `s` is the stream at the start of the line, `t` is the current stream in the middle of the line, and `p` is the position. Printing the error message is then a question of taking the stream at the start of the line, consuming the entire line from that stream, and formatting the output nicely, i.e. left as an exercise for the reader.
+
+** pretty-printing ASTs
+
+It's worth noting that some programming language implementations take a pretty drastically different approach to this entire problem: pretty printing abstract syntax trees. Particularly relevent is SML/NJ, which uses this when printing type errors:
+
+#+BEGIN_SRC sml
+  val xs = [1,2,3]
+
+  val _ = case List.getItem xs of
+              SOME (y, ys) => y
+            | NONE         => xs
+#+END_SRC
+
+This is a simple example (note that the case expression's branches are of different type) that yields the following error:
+
+#+BEGIN_SRC
+  3.9-5.31 Error: case object and rules don't agree [tycon mismatch]
+    rule domain: (int list * 'Z) option
+    object: (int * int list) option
+    in expression:
+      (case (List.getItem xs)
+        of SOME (y,ys) => y
+         | NONE => xs)
+#+END_SRC
+
+The concrete syntax appearing after "in expression:" has been reconstructed and pretty-printed (I think) from the abstract syntax tree, and in any case differs from the original in whitespace and parenthesization. This occasionally causes me some confusion when debugging really hairy type errors, with more complicated expressions. Interestingly, the position ("3.9-5.31" which the start and end of the expression, in the form "line.column-line.column") DOES match up with the original input. So SML/NJ must keep that info around but doesn't use it to go back to the original input.
