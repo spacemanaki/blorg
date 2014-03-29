@@ -1,0 +1,82 @@
+#+TITLE: Parsing type expressions
+#+DATE:
+#+AUTHOR: aki
+#+EMAIL: aki@utahraptor
+#+OPTIONS: ':nil *:t -:t ::t <:t H:3 \n:nil ^:t arch:headline
+#+OPTIONS: author:t c:nil creator:comment d:(not LOGBOOK) date:t e:t
+#+OPTIONS: email:nil f:t inline:t num:t p:nil pri:nil stat:t tags:t
+#+OPTIONS: tasks:t tex:t timestamp:t toc:t todo:t |:t
+#+CREATOR: Emacs 24.3.1 (Org mode 8.0.3)
+#+DESCRIPTION:
+#+EXCLUDE_TAGS: noexport
+#+KEYWORDS:
+#+LANGUAGE: en
+#+SELECT_TAGS: export
+
+Statically typed programming languages, whether or not they have type inference, need some kind of syntax for types. Even if the programmer doesn't have to write down the types for most expressions, the compiler needs a way to communicate types to the programmer in the case of type errors (e.g. the compiler needs to fill in A and B in a message like "expected value of type A but got value of type B"), and annotating types in spite of type inference is generally regarded as good practice.
+
+In some (or all?) programming languages, the syntax for types is a mini-language all of its own: there are primitives and atoms along with a means of combining them, and there are even variables with scope. I've stumbled on this idea in a few different places (EOPL, PLAI, and in conversations at Hacker School) and this seems to be a really subtle thing but I haven't fully wrapped my head around it yet. That said, it was clear to me early on that ML compiler would need to parse type expressions.
+
+** type expressions in ML
+
+The mini-language of type expressions describes the possible types of values in ML. The primitives are the base types: `int`, `real`, `bool`, `char`, `string`, etc. The means of combination are tuples, records, functions, and user-defined datatypes. Type variables occur in polymorphic types, such as the type of polymorphic lists: `'a list`.
+
+Restricting ourselves to a smaller subset than the full set of possible types in Standard ML, let's focus on a few base types (`int`, `bool`, and `char`), tuples, functions and user-defined datatypes. This is enough to make things interesting without getting too bogged down in the details.
+
+The primitive types are simple, expressed in EBNF they are:
+
+#+BEGIN_SRC
+primitive = "int" | "bool" | "char" ;
+#+END_SRC
+
+Type variables are little unusual, consisting of a single apostrophe followed by a letter:
+
+#+BEGIN_SRC
+variable = "'" , letter ;
+#+END_SRC
+
+The syntax for tuples is a pair of other types separated by an asterisk (`*`):
+
+#+BEGIN_SRC
+tuple = type , "*" , type ;
+#+END_SRC
+
+Functions are similar, but use an arrow (`->`) instead of an asterisk:
+
+#+BEGIN_SRC
+function = type , "->" , type ;
+#+END_SRC
+
+The postfix syntax for user-defined types is one of the most interesting. Here's a few examples of the kind of user-defined datatypes we need to support:
+
+#+BEGIN_SRC sml
+  datatype 'a option = SOME of 'a | NONE
+  datatype ('a, 'b) either = Left of 'a | Right of 'b
+#+END_SRC
+
+Notice that `('a, 'b) either` requires two type variables, since the type of the left and right variants could be different. These variables are instantiated like any other, for example resulting in the monomorphic type `(int, string) either`.
+
+#+BEGIN_SRC
+datatype    = ( type | list ) , constructor ;
+list        = "(" type { "," , type } ")" ;
+constructor = letter { letter | digit } ;
+#+END_SRC
+
+Finally, types can also be groups using parenthesis, in order to make explicit or override the default precedence of the different operators:
+
+#+BEGIN_SRC
+type = [ "(" ] , primitive | variable | tuple | function | datatype , [ ")" ] ;
+#+END_SRC
+
+Here's the grammer for the whole language in one place:
+
+#+BEGIN_SRC
+primitive   = "int" | "bool" | "char" ;
+variable    = "'" , letter ;
+tuple       = type , "*" , type ;
+function    = type , "->" , type ;
+datatype    = ( type | list ) , constructor ;
+list        = "(" type { "," , type } ")" ;
+constructor = letter { letter | digit } ;
+type        = [ "(" ] , primitive | variable | tuple | function | datatype , [ ")" ] ;
+#+END_SRC
