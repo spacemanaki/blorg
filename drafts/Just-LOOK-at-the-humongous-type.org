@@ -1,0 +1,175 @@
+#+TITLE: Just LOOK at the humongous type that Hindley-Milner infers for this tiny program!
+#+AUTHOR: aki
+
+** Or, check out this one weird trick to make Hindley-Milner blow-up! Haskell compilers hate it!
+
+Last month I gave a mini-talk at [[http://bangbangcon.com/][!!Con]], which was loads of fun! The
+video of the talk is online, as are the videos of the other talks, and
+they were all rad, so you should [[http://bangbangcon.com/recordings.html][go watch them all]] if you weren't able
+to attend and haven't seen them yet.
+
+This was basically my first talk. I submitted a proposal fully
+expecting not to have it accepted. Not only that, but I submitted a
+proposal with very little material prepared.
+
+Perhaps as a result, the talk was a little rough around the edges. I
+hope that some of the !!Con attendees got something out of it, but I
+thought it might be helpful to anyone who saw the talk and was
+interested but didn't completely follow it, if I wrote up the contents
+of the talk as a blog post where I could flesh out some of the finer
+points.
+
+** Haskell and ML
+
+All of the examples in this post use Standard ML, but anywhere I say
+"ML" you can imagine I'm talking about Haskell as well since this the
+two languages are similar.
+
+If you're not familiar with Haskell or ML (or another statically typed
+functional languages that uses Hindley-Milner) unfortunately this post
+may be meaningless to you. At the beginning of my talk I tried to give
+the audience a crash course on the syntax of the lambda calculus so
+that everyone would at least be able to read my slides but I'm going
+to skip that overview here, on the assumption that there are better
+resources for learning about ML than a hasty introduction written by
+me. [[http://www.cs.cmu.edu/~rwh/smlbook/book.pdf][This is a very good introductory book]] on Standard ML, written by
+Robert Harper of CMU, which I highly recommend if you're interested in
+learning ML.
+
+** Hindley-Milner
+
+For a long time, the performance of Hindley-Milner type inference was
+thought to be [polymorphic? linear?] but this was largely a folklore
+result, until a few different computer scientists proved that the
+actual worst case performance was much slower.
+
+** let-polymorphism
+
+*** parametric polymorphism
+
+One feature of type systems based on Hindley-Milner is something
+called parametric polymorphism. This feature enables code reuse by
+introducing type variables that can range over any other type. The
+simplest example of a polymorphic value is the identity function:
+
+#+BEGIN_SRC sml
+  fun id x = x
+#+END_SRC
+
+The type of this function is `'a -> 'a`, which mwans that it takes a
+value any type, and returns a value of that same type. Without
+parametric polymorphism, you'd have to write a version of the identity
+function for every concrete type: one for integers, booleans,
+characters, strings, etc. The same applies to more interesting
+functions like `map`:
+
+#+BEGIN_SRC sml
+  fun map f l = ...
+#+END_SRC
+
+The type of `map` is `('a -> 'b) -> 'a list -> 'b list` and it can be
+used with lists containing values of any type, and functions mapping
+that type to any other type.
+
+*** let vs lambda
+
+There are two kinds of local variables in ML, let-bound variables
+which are introduced by `let` and lambda-bound variables which are
+arguments in a `lambda` expression. Arguments to named functions are
+considered the same as lambda-bound variables, since function
+declarations can be treated as syntactic sugar.
+
+If `f` isn't recursive, then
+
+#+BEGIN_SRC sml
+  fun f x = ...
+#+END_SRC
+
+is the same as
+
+#+BEGIN_SRC sml
+  val f = fn x => ...
+#+END_SRC
+
+and if it is recursive it's the same as
+
+#+BEGIN_SRC sml
+  val rec f = fn x => ...
+#+END_SRC
+
+If you're coming from a Lisp or a Scheme, which is where I was before
+learning ML, then you're probably familiar with this relationship
+between `let` and `lambda`. When being first introduced to macros,
+`let` is often an early example, because you can implement `let` as a
+macro, in terms of `lambda` and function applications. For example:
+
+#+BEGIN_SRC sml
+  let
+     val x = e
+  in
+     body
+  end
+#+END_SRC
+
+would be transformed into
+
+#+BEGIN_SRC sml
+  (fn x => body) e
+#+END_SRC
+
+Both of these create a local variable named `x`, bind it to `e`, and
+evaluate the `body`. JavaScript programmers call this second form an
+immediately-invoked-function-expression, and it's a way to introduce
+local variables due to the fact that JavaScript only has function
+scope.
+
+It turns out that there's a crucial difference with the way let-bound
+and lambda-bound variables are typed in Hindley-Milner languages.
+
+Here's an example of a program using `let`:
+
+#+BEGIN_SRC sml
+  let
+     val id = fn x => x
+  in
+     (id 3, id true)
+  end
+#+END_SRC
+
+It introduces a polymorphic identity function, binds it to `id`, and
+then calls it with `3` and `true`. This type checks under
+Hindley-Milner without any problem.
+
+Now here's the same example if you transformed it as if `let` was a macro:
+
+#+BEGIN_SRC sml
+  (fn id => (id 3, id true)) (fn x => x)
+#+END_SRC
+
+In this case, the function on the left is being applied to an
+anonymous identity function, binding it to `id` and calling it with
+`3` and `true` again. This doesn't type check under Hindley-Milner.
+
+The reason that this program doesn't type check but the previous one
+does is that lambda-bound variables are not allowed to have
+polymorphic values, but let-bound variables are.
+
+So in ML, `let` is more than syntactic sugar, and this feature is
+called "let-polymorphism".
+
+One way that `let-polymorphism` could be implemented in a type checker
+is to literally copy and paste the code. In the example above the
+compiler would generate an integer and a boolean version of the
+identity function and apply them to the right arguments in the
+body. Of course, there are other ways to implement it, but naive
+approach hints at the complications it introduces.
+
+** exponential function composition
+
+The second feature of ML that conspires to degrade the performance of
+Hindley-Milner is something that just sort of falls out from the way
+that `let` works, in that `let` allows us to concisely express
+exponential function composition. In essence, `let` allows us to write
+a series of increasingly larger programs which only grow in size
+linearly, but consist of composing a function an exponential number of
+times.
