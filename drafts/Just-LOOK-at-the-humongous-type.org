@@ -4,26 +4,36 @@
 ** Or, check out this one weird trick to make Hindley-Milner blow-up! Haskell compilers hate it!
 
 Last month I gave a mini-talk at [[http://bangbangcon.com/][!!Con]], which was loads of fun! The
-video of the talk is online, as are the videos of the other talks, and
-they were all rad, so you should [[http://bangbangcon.com/recordings.html][go watch them all]] if you weren't able
-to attend and haven't seen them yet.
+videos of all of the talks are online, so you can [[http://bangbangcon.com/recordings.html][watch them]] if you
+weren't able to attend and haven't seen them yet.
+
+My talk was on the worst case performance of Hindley-Milner type
+inference, which is a type inference algorithm that forms basis for
+the type systems of statically typed functional languages like Haskell
+and OCaml. The punch-line is that the performance is exponential in
+the worse case, in the size of the program source, which I found both
+interesting and baffling when I first learned about it, since
+exponential time is kind of, well, bad.
 
 This was basically my first talk. I submitted a proposal fully
 expecting not to have it accepted. Not only that, but I submitted a
 proposal with very little material prepared.
 
 Perhaps as a result, the talk was a little rough around the edges. I
-hope that some of the !!Con attendees got something out of it, but I
-thought it might be helpful to anyone who saw the talk and was
-interested but didn't completely follow it, if I wrote up the contents
-of the talk as a blog post where I could flesh out some of the finer
-points.
+certainly hope that some of the !!Con attendees got something out of
+it. I thought I should write up the contents of the talk as a blog
+post where I could flesh out some of the finer points, partly for my
+own benefit since I developed some better understanding only after the
+talk was over.
 
 ** Haskell and ML
 
 All of the examples in this post use Standard ML, but anywhere I say
-"ML" you can imagine I'm talking about Haskell as well since this the
-two languages are similar.
+"ML" you can imagine I'm talking about Haskell, OCaml, or F#, since at
+least as far as the type inference is concerned, these languages are
+similar. In actual fact, the papers on this boil things down to a core
+ML language which is only a little bit richer than the lambda
+calculus.
 
 If you're not familiar with Haskell or ML (or another statically typed
 functional languages that uses Hindley-Milner) unfortunately this post
@@ -31,10 +41,10 @@ may be meaningless to you. At the beginning of my talk I tried to give
 the audience a crash course on the syntax of the lambda calculus so
 that everyone would at least be able to read my slides but I'm going
 to skip that overview here, on the assumption that there are better
-resources for learning about ML than a hasty introduction written by
-me. [[http://www.cs.cmu.edu/~rwh/smlbook/book.pdf][This is a very good introductory book]] on Standard ML, written by
-Robert Harper of CMU, which I highly recommend if you're interested in
-learning ML.
+resources for learning about ML and the lambda calculus than a hasty
+introduction written by me. [[http://www.cs.cmu.edu/~rwh/smlbook/book.pdf][This is a very good introductory book]] on
+Standard ML, written by Robert Harper of CMU, which I highly recommend
+if you're interested in learning ML.
 
 ** Hindley-Milner
 
@@ -43,12 +53,28 @@ thought to be [polymorphic? linear?] but this was largely a folklore
 result, until a few different computer scientists proved that the
 actual worst case performance was much slower.
 
+I ran across this in [[http://stackoverflow.com/questions/22060592/very-long-type-inference-sml-trick][a Stack Overflow question (and answer)]], and
+although that answer actually sums up everything in this post and in
+my talk, I ended up having to research this quite a bit more since I
+wasn't able to wrap my head around it with just the examples given
+there. Most of my understanding I derived from the paper "Deciding ML
+typability is complete for deterministic exponential time" published
+by Harry G. Mairson in 1990. There's a complete list of references at
+the bottom of this post.
+
+The crux of the issue is that there are two features of Hindley-Milner
+type systems that work together to ruin the performance of the
+algorithm. Both of them relate to `let` expressions, and in fact if
+you take `let` away you can do type inference in linear time. That
+fact alone is quite interesting to me, since while `let` is an
+important feature of ML, it appears to be quite a costly one!
+
 ** let-polymorphism
 
 *** parametric polymorphism
 
-One feature of type systems based on Hindley-Milner is something
-called parametric polymorphism. This feature enables code reuse by
+The first feature of Hindley-Milner that causes problems is something
+called "parametric polymorphism". This enables code reuse by
 introducing type variables that can range over any other type. The
 simplest example of a polymorphic value is the identity function:
 
@@ -168,8 +194,59 @@ approach hints at the complications it introduces.
 
 The second feature of ML that conspires to degrade the performance of
 Hindley-Milner is something that just sort of falls out from the way
-that `let` works, in that `let` allows us to concisely express
-exponential function composition. In essence, `let` allows us to write
-a series of increasingly larger programs which only grow in size
-linearly, but consist of composing a function an exponential number of
-times.
+that `let` works. It allows us to concisely express exponential
+function composition. In essence, `let` allows us to write a series of
+increasingly larger programs which only grow in size linearly, but
+consist of composing a function an exponential number of times.
+
+As an example, here's a little ML program that uses `let`:
+
+#+BEGIN_SRC sml
+  let val x0 = fn x => x in
+     let val x1 = fn y => x0(x0(y)) in
+        x1
+     end
+  end
+#+END_SRC
+
+The first `let` binds `x0` to the familiar identity function: `fn x =>
+x`. The second `let` binds `x1` to a function that composes `x0`
+twice. The body of the these nested `let`s returns `x1` which actually
+behaves the same as the identity function. Leaving aside that this
+program does't do anything very interesting for a moment, here's
+another program with nested `let`s, that's got one extra level of
+nesting:
+
+#+BEGIN_SRC sml
+  let val x0 = fn x => x in
+     let val x1 = fn y => x0(x0(y)) in
+        let val x2 = fn y => x1(x1(y)) in
+           let val x3 = fn y => x2(x2(y)) in
+           x3
+        end
+     end
+  end
+#+END_SRC
+
+The extra `let`s bind `x2` to a function that composes `x1` twice, and
+then `x3` to a function that composes `x2` twice. Hopefully you can
+see where this is going: each time we add an extra nested `let`, we
+double the number of times that `x0` is being composed. If you were to
+transform the `let` expressions by hand, you'd end up with something
+like:
+
+#+BEGIN_SRC sml
+  val x0 = fn x => x
+  val x1 = fn y => x0(x0(y))
+  val x2 = fn y => x0(x0(x0(x0(y))))
+  val x3 = fn y => x0(x0(x0(x0(x0(x0(x0(x0(y))))))))
+#+END_SRC
+
+All of these functions behave the same way as the identity function,
+but it's easy to imagine replacing `x0` with something more
+interesting. And using the pattern above, you'd able to write a
+program that concisely composes `x0` many times. The important point
+is that when this program is changed by adding a single nested `let`,
+its size grows linearly, but the number of compositions grows
+exponentially (by doubling).
+
