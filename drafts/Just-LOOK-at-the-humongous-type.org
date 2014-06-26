@@ -8,32 +8,38 @@ videos of all of the talks are online, so you can [[http://bangbangcon.com/recor
 weren't able to attend and haven't seen them yet.
 
 My talk was on the worst case performance of Hindley-Milner type
-inference, which is a type inference algorithm that forms basis for
-the type systems of statically typed functional languages like Haskell
-and OCaml. The punch-line is that the performance is exponential in
-the worse case, in the size of the program source, which I found both
-interesting and baffling when I first learned about it, since
-exponential time is kind of, well, bad.
+inference. The punch-line is that in the worst case, the performance
+is exponential in both time and space in the size of the program
+source. I found this both interesting and baffling when I first
+learned about it, since exponential time is, well, kind of bad.
 
-This was basically my first talk. I submitted a proposal fully
-expecting not to have it accepted. Not only that, but I submitted a
-proposal with very little material prepared.
+This was my first talk ever. I submitted a proposal fully expecting it
+to be rejected. Not only that, but I submitted a proposal with very
+little material prepared. I had worked on an implementation of baby
+Hindley-Milner (no let-polymorphism, which turns out to be relevant)
+last summer at Hacker School, but all I knew about the performance was
+that there exists this edge case, I really didn't understand why.
 
-Perhaps as a result, the talk was a little rough around the edges. I
-certainly hope that some of the !!Con attendees got something out of
-it. I thought I should write up the contents of the talk as a blog
-post where I could flesh out some of the finer points, partly for my
-own benefit since I developed some better understanding only after the
-talk was over.
+Perhaps as a result, the talk was a little rough around the edges!
+While I certainly hope that some of the !!Con attendees got something
+out of it, I wouldn't fault anyone for getting immediately lost after
+the intro. Furthermore, I had to end the talk in a sort of
+anticlimactic way because I hadn't yet fully wrapped my head around
+the issue. Only afterward did the pieces really fall into place for
+me.
+
+I thought it would be helpful (for myself as much as anyone else) if I
+wrote up the contents of the talk as a blog post and flesh out some of
+the finer points.
 
 ** Haskell and ML
 
 All of the examples in this post use Standard ML, but anywhere I say
 "ML" you can imagine I'm talking about Haskell, OCaml, or F#, since at
-least as far as the type inference is concerned, these languages are
-similar. In actual fact, the papers on this boil things down to a core
-ML language which is only a little bit richer than the lambda
-calculus.
+least as far as the type inference algorithms are concerned, these
+languages are similar. In actual fact, the papers that prove the
+exponential time result boil things down to a core ML language which
+is only a little bit richer than the lambda calculus.
 
 If you're not familiar with Haskell or ML (or another statically typed
 functional languages that uses Hindley-Milner) unfortunately this post
@@ -44,7 +50,10 @@ to skip that overview here, on the assumption that there are better
 resources for learning about ML and the lambda calculus than a hasty
 introduction written by me. [[http://www.cs.cmu.edu/~rwh/smlbook/book.pdf][This is a very good introductory book]] on
 Standard ML, written by Robert Harper of CMU, which I highly recommend
-if you're interested in learning ML.
+if you're interested in learning ML. SML is (currently) my
+Hindley-Milner language of choice, but Haskell is sometimes called the
+crown-jewel of the Hindley-Milner family, for good reason, and there
+are loads of high quality resources for learning Haskell.
 
 ** Hindley-Milner
 
@@ -59,8 +68,8 @@ my talk, I ended up having to research this quite a bit more since I
 wasn't able to wrap my head around it with just the examples given
 there. Most of my understanding I derived from the paper "Deciding ML
 typability is complete for deterministic exponential time" published
-by Harry G. Mairson in 1990. There's a complete list of references at
-the bottom of this post.
+by Harry G. Mairson in 1990. I've included a complete list of
+references at the bottom of this post.
 
 The crux of the issue is that there are two features of Hindley-Milner
 type systems that work together to ruin the performance of the
@@ -69,25 +78,40 @@ you take `let` away you can do type inference in linear time. That
 fact alone is quite interesting to me, since while `let` is an
 important feature of ML, it appears to be quite a costly one!
 
+The two features involved in the pathological case are
+let-polymorphism and the ability of `let` to express exponential
+function composition. Together, they enable an ML programmer to write
+programs which construct expressions whose types are actually
+exponential in size. In fact, the main reason that this edge case is
+not a problem in practice and that Hindley-Milner is "fast enough" is
+that it's extraordinarily rare to have types this large in real
+programs!
+
 ** let-polymorphism
+
+The first feature of Hindley-Milner that I'll discuss is
+"let-polymorphism", but before I get to it I should briefly review ML
+style polymorphism. You may be familiar with this in Haskell or ML but
+if not you might have encountered it in Java, C#, Scala and other
+langauges in the form of "generics".
 
 *** parametric polymorphism
 
-The first feature of Hindley-Milner that causes problems is something
-called "parametric polymorphism". This enables code reuse by
-introducing type variables that can range over any other type. The
-simplest example of a polymorphic value is the identity function:
+Parametric polymorphism is a feature of a type system that enables
+code reuse by introducing type variables that can range over any other
+type. The simplest example of a polymorphic value is the identity
+function (recall that this is Standard ML):
 
 #+BEGIN_SRC sml
   fun id x = x
 #+END_SRC
 
-The type of this function is `'a -> 'a`, which mwans that it takes a
-value any type, and returns a value of that same type. Without
-parametric polymorphism, you'd have to write a version of the identity
-function for every concrete type: one for integers, booleans,
-characters, strings, etc. The same applies to more interesting
-functions like `map`:
+The type of this function is `'a -> 'a`, which means that it takes a
+value any type, and returns a value of that same type (`->` is the
+type constructor for functions). Without parametric polymorphism,
+you'd have to write a version of the identity function for every
+concrete type: one for integers, booleans, characters, strings,
+etc. The same applies to more interesting functions like `map`:
 
 #+BEGIN_SRC sml
   fun map f l = ...
@@ -95,15 +119,17 @@ functions like `map`:
 
 The type of `map` is `('a -> 'b) -> 'a list -> 'b list` and it can be
 used with lists containing values of any type, and functions mapping
-that type to any other type.
+that type to any other type (in ML, type constructors are postfix, so
+`'a list` means "list of `'a`", a.k.a. `List<A>` in Java).
 
 *** let vs lambda
 
 There are two kinds of local variables in ML, let-bound variables
 which are introduced by `let` and lambda-bound variables which are
-arguments in a `lambda` expression. Arguments to named functions are
-considered the same as lambda-bound variables, since function
-declarations can be treated as syntactic sugar.
+arguments in a `lambda` expression, i.e. an anonymous function
+expression. Arguments to named functions are considered the same as
+lambda-bound variables, since function declarations can be treated as
+syntactic sugar.
 
 If `f` isn't recursive, then
 
