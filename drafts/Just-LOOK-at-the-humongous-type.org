@@ -1,59 +1,88 @@
 #+TITLE: Just LOOK at the humongous type that Hindley-Milner infers for this tiny program!
 #+AUTHOR: aki
 
-** Or, check out this one weird trick to make Hindley-Milner blow-up! Haskell compilers hate it!
+** Or, check out this one weird trick to make Hindley-Milner blow up! Haskell and ML compilers hate it!
 
-Last month I gave a mini-talk at [[http://bangbangcon.com/][!!Con]], which was loads of fun! The
-videos of all of the talks are online, so you can [[http://bangbangcon.com/recordings.html][watch them]] if you
-weren't able to attend and haven't seen them yet.
+In May I gave a mini-talk at [[http://bangbangcon.com/][!!Con]], and it was loads of fun! The
+videos and transcripts of all of the talks are online so you can [[http://bangbangcon.com/recordings.html][watch
+them]] if you weren't able to attend and haven't seen them yet.
 
-My talk was on the worst case performance of Hindley-Milner type
-inference. The punch-line is that in the worst case, the performance
-is exponential in both time and space in the size of the program
-source. I found this both interesting and baffling when I first
-learned about it, since exponential time is, well, kind of bad.
+My talk was on the performance of Hindley-Milner type inference. The
+punch line is that the worst case performance is exponential in both
+time and space in the size of the input program. When I first learned
+about this, I found it both fascinating and baffling since exponential
+time is pretty bad!
 
-This was my first talk ever. I submitted a proposal fully expecting it
-to be rejected. Not only that, but I submitted a proposal with very
-little material prepared. I had worked on an implementation of baby
-Hindley-Milner (no let-polymorphism, which turns out to be relevant)
-last summer at Hacker School, but all I knew about the performance was
-that there exists this edge case, I really didn't understand why.
+** Talks are HARD! Ten minutes talks are REALLY HARD!!
+
+This was my first conference talk, and in fact !!Con was my first tech
+conference as an attendee too. I submitted the proposal fully
+expecting it to be rejected, and also submitted it with [[http://weareallaweso.me/for_speakers/starting-with-nothing.html][very little
+material prepared]]. I had worked on an implementation of baby
+Hindley-Milner before (no let-polymorphism, which turns out to be
+relevant), but all I knew about the performance was that this edge
+case exists, and I didn't really understand why.
+
+In fact, after [[https://twitter.com/spacemanaki/status/463496401469833217][many hours or studying]], I still didn't really
+understand what was going on. I had planned on trying to overprepare
+for the talk, thinking that in 10 minutes the best I could hope for
+would be to capture the essence of the edge case in a superficial way,
+and rely on a deep well of understanding to back it up and pick out
+what was important to highlight. I don't think I ever really managed
+to get that deep well even now.
 
 Perhaps as a result, the talk was a little rough around the edges!
 While I certainly hope that some of the !!Con attendees got something
 out of it, I wouldn't fault anyone for getting immediately lost after
 the intro. Furthermore, I had to end the talk in a sort of
-anticlimactic way because I hadn't yet fully wrapped my head around
-the issue. Only afterward did the pieces really fall into place for
-me.
+anti-climactic way because I hadn't yet fully wrapped my head around
+the issue.
 
 I thought it would be helpful (for myself as much as anyone else) if I
-wrote up the contents of the talk as a blog post and flesh out some of
-the finer points.
+wrote up the contents of the talk as a blog post and along the way
+fleshed out some of the finer points. I should emphasize that there
+are still large gaps in my understanding so what follows is definitely
+an incomplete picture and may even be erroneous.
+
+This post will serve a few purposes: first as an alternate
+presentation of the material in my talk, second as an attempt to
+distill everything I learned while preparing for the talk that I may
+not have included, and finally as a kind of experience report from a
+first-time conference speaker.
 
 ** Haskell and ML
 
 All of the examples in this post use Standard ML, but anywhere I say
-"ML" you can imagine I'm talking about Haskell, OCaml, or F#, since at
-least as far as the type inference algorithms are concerned, these
-languages are similar. In actual fact, the papers that prove the
-exponential time result boil things down to a core ML language which
-is only a little bit richer than the lambda calculus.
+"ML" you can imagine I'm talking about Haskell, OCaml, F#, or any
+other language that uses Hindley-Milner, since at least as far as the
+type inference algorithms are concerned, these languages are
+similar. In actual fact, the papers that prove the exponential time
+result boil things down to a core ML language which is only a little
+bit richer than the simply typed lambda calculus. It's worth pointing
+out that although Scala is often lumped with these languages due to
+being a functional programming language with a rich static type system
+that includes some type inference, Scala's type system isn't based on
+Hindley-Milner and so I don't think that any of this applies to Scala.
 
-If you're not familiar with Haskell or ML (or another statically typed
-functional languages that uses Hindley-Milner) unfortunately this post
-may be meaningless to you. At the beginning of my talk I tried to give
-the audience a crash course on the syntax of the lambda calculus so
-that everyone would at least be able to read my slides but I'm going
-to skip that overview here, on the assumption that there are better
-resources for learning about ML and the lambda calculus than a hasty
-introduction written by me. [[http://www.cs.cmu.edu/~rwh/smlbook/book.pdf][This is a very good introductory book]] on
-Standard ML, written by Robert Harper of CMU, which I highly recommend
-if you're interested in learning ML. SML is (currently) my
-Hindley-Milner language of choice, but Haskell is sometimes called the
-crown-jewel of the Hindley-Milner family, for good reason, and there
-are loads of high quality resources for learning Haskell.
+If you're not familiar with Haskell or ML, this post may still be
+interesting but it will be harder going. At the beginning of my talk I
+tried to give the audience a crash course on the syntax of the lambda
+calculus so that everyone would at least be able to read my slides,
+but I'm going to skip that overview here, on the assumption that there
+are better resources for learning about ML and the lambda calculus
+than a hasty introduction written by me.
+
+Robert Harper of CMU has written [[http://www.cs.cmu.edu/~rwh/smlbook/book.pdf][a very good and freely available
+introductory book]] on Standard ML, which I highly recommend if you're
+interested in learning ML. Standard ML is sort of my Hindley-Milner
+language of choice, but in some circles Haskell considered [[http://matt.might.net/articles/what-cs-majors-should-know/][the crown
+jewel of the Hindley-Milner family]], and there are [[https://github.com/bitemyapp/learnhaskell][loads of high
+quality resources]] for learning Haskell. OCaml would also probably be a
+fine choice. Although I haven't had a chance to use it much, one of
+the !!Con organizers recently [[http://blog.nullspace.io/beginners-guide-to-ocaml-beginners-guides.html][recently blogged]] about getting started
+in OCaml, and it would be a better choice than SML (and maybe Haskell
+too) for more practical projects (i.e. projects that are not ML
+compilers, and maybe even those that are), if that's important to you.
 
 ** Hindley-Milner
 
@@ -68,15 +97,15 @@ my talk, I ended up having to research this quite a bit more since I
 wasn't able to wrap my head around it with just the examples given
 there. Most of my understanding I derived from the paper "Deciding ML
 typability is complete for deterministic exponential time" published
-by Harry G. Mairson in 1990. I've included a complete list of
-references at the bottom of this post.
+by Harry G. Mairson in 1990. (I've included a complete list of
+references at the bottom of this post)
 
 The crux of the issue is that there are two features of Hindley-Milner
 type systems that work together to ruin the performance of the
 algorithm. Both of them relate to `let` expressions, and in fact if
 you take `let` away you can do type inference in linear time. That
 fact alone is quite interesting to me, since while `let` is an
-important feature of ML, it appears to be quite a costly one!
+important feature of ML, it appears to come at quite a high cost!
 
 The two features involved in the pathological case are
 let-polymorphism and the ability of `let` to express exponential
@@ -100,7 +129,7 @@ langauges in the form of "generics".
 Parametric polymorphism is a feature of a type system that enables
 code reuse by introducing type variables that can range over any other
 type. The simplest example of a polymorphic value is the identity
-function (recall that this is Standard ML):
+function (in Standard ML):
 
 #+BEGIN_SRC sml
   fun id x = x
@@ -127,33 +156,16 @@ that type to any other type (in ML, type constructors are postfix, so
 There are two kinds of local variables in ML, let-bound variables
 which are introduced by `let` and lambda-bound variables which are
 arguments in a `lambda` expression, i.e. an anonymous function
-expression. Arguments to named functions are considered the same as
+expression. (arguments to named functions are considered the same as
 lambda-bound variables, since function declarations can be treated as
-syntactic sugar.
-
-If `f` isn't recursive, then
-
-#+BEGIN_SRC sml
-  fun f x = ...
-#+END_SRC
-
-is the same as
-
-#+BEGIN_SRC sml
-  val f = fn x => ...
-#+END_SRC
-
-and if it is recursive it's the same as
-
-#+BEGIN_SRC sml
-  val rec f = fn x => ...
-#+END_SRC
+syntactic sugar.)
 
 If you're coming from a Lisp or a Scheme, which is where I was before
-learning ML, then you're probably familiar with this relationship
-between `let` and `lambda`. When being first introduced to macros,
-`let` is often an early example, because you can implement `let` as a
-macro, in terms of `lambda` and function applications. For example:
+learning ML, then you're probably familiar with the relationship
+between `let` and `lambda`. When first being introduced to macros,
+`let` is often used as an early example, because you can implement
+`let` as a macro, in terms of `lambda` and function application. For
+example:
 
 #+BEGIN_SRC sml
   let
@@ -169,11 +181,12 @@ would be transformed into
   (fn x => body) e
 #+END_SRC
 
-Both of these create a local variable named `x`, bind it to `e`, and
-evaluate the `body`. JavaScript programmers call this second form an
+Both of these creates a local variable named `x`, binds it to the
+result of `e`, and evaluates the `body` expression. JavaScript
+programmers call this second form an
 immediately-invoked-function-expression, and it's a way to introduce
-local variables due to the fact that JavaScript only has function
-scope.
+local variables (leveraging the fact that JavaScript only has function
+scope).
 
 It turns out that there's a crucial difference with the way let-bound
 and lambda-bound variables are typed in Hindley-Milner languages.
@@ -204,17 +217,21 @@ anonymous identity function, binding it to `id` and calling it with
 
 The reason that this program doesn't type check but the previous one
 does is that lambda-bound variables are not allowed to have
-polymorphic values, but let-bound variables are.
+polymorphic values, but let-bound variables are. So in ML, `let` is
+more than syntactic sugar, and this feature is called
+"let-polymorphism".
 
-So in ML, `let` is more than syntactic sugar, and this feature is
-called "let-polymorphism".
+(Why can't you just allow polymorphic lambda-bound variables?)
 
 One way that `let-polymorphism` could be implemented in a type checker
 is to literally copy and paste the code. In the example above the
 compiler would generate an integer and a boolean version of the
 identity function and apply them to the right arguments in the
-body. Of course, there are other ways to implement it, but naive
-approach hints at the complications it introduces.
+body. Of course, there are other ways to implement it, but I think
+that this naive approach hints at the complications that it
+introduces.
+
+(What are the other ways of implementing it?)
 
 ** exponential function composition
 
@@ -276,3 +293,59 @@ is that when this program is changed by adding a single nested `let`,
 its size grows linearly, but the number of compositions grows
 exponentially (by doubling).
 
+Despite all of this type of `x3` is still just `'a -> 'a` because it's
+the same as the plain identity function. In order to get a larger type
+out of this program, we need to replace `x0` with something more
+interesting.
+
+** pathological case
+
+There are many (in fact, infinitely many, or almost infinitely many)
+different programs that exhibit this pathological behavior. But the
+simplest example I've come across is not that different from the
+example programs above. All we have to do is replace `x0` with a pair
+constructor:
+
+#+BEGIN_SRC sml
+  fun pair x = (x, x)
+#+END_SRC
+
+This function takes one argument and returns a pair consisting of that
+value in both first and second positions of the pair. It's only a bit
+more interesting than the identity function but the type alone tells
+us a lot about why it's involved in this pathological case: `'a ->
+'a * 'a`. Compare it with the type of the identity: `'a -> 'a`.
+
+The difference between these two is the return type. In the pair
+function, the return type is the product of the argument type with
+itself. The return type is twice the size of argument type. If you
+apply this function to a value of any type, the return value will have
+a type that is twice as large. If we use `let` to compose the pair
+constructor an exponential number of times, we'll get a type that is
+exponential in size.
+
+(Do we actually need `let` to construct exponentially large types?)
+
+The actual value we end up assembling is a binary tree (pairs of pairs
+of pairs ...) where the leaves can be any value we choose.
+
+** structural sharing
+
+type has repeated sub-structures, can turn the tree into a graph with
+shared sub-graphs
+
+printing the type vs graph representation
+
+use a polymorphic value to defeat this
+
+** empirical evidence
+
+graphs
+
+different flavors of pathological inputs
+
+** "How to compile Turing machines to ML types"
+
+complexity and computability theory
+
+Mairson's proof technique
