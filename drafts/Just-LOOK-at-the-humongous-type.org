@@ -15,9 +15,9 @@ time is pretty bad!
 
 ** Talks are HARD! Ten minutes talks are REALLY HARD!!
 
-This was my first conference talk, and in fact !!Con was my first tech
-conference as an attendee too. I submitted the proposal fully
-expecting it to be rejected, and also submitted it with [[http://weareallaweso.me/for_speakers/starting-with-nothing.html][very little
+This was my first conference talk, and in fact !!Con was the first
+conference I've ever attended. I submitted the proposal fully
+expecting to be rejected, and also submitted it with [[http://weareallaweso.me/for_speakers/starting-with-nothing.html][very little
 material prepared]]. I had worked on an implementation of baby
 Hindley-Milner before (no let-polymorphism, which turns out to be
 relevant), but all I knew about the performance was that this edge
@@ -29,26 +29,16 @@ for the talk, thinking that in 10 minutes the best I could hope for
 would be to capture the essence of the edge case in a superficial way,
 and rely on a deep well of understanding to back it up and pick out
 what was important to highlight. I don't think I ever really managed
-to get that deep well even now.
-
-Perhaps as a result, the talk was a little rough around the edges!
-While I certainly hope that some of the !!Con attendees got something
-out of it, I wouldn't fault anyone for getting immediately lost after
-the intro. Furthermore, I had to end the talk in a sort of
-anti-climactic way because I hadn't yet fully wrapped my head around
-the issue.
+to get that deep well even after giving the talk and going over my
+notes many weeks later.
 
 I thought it would be helpful (for myself as much as anyone else) if I
 wrote up the contents of the talk as a blog post and along the way
 fleshed out some of the finer points. I should emphasize that there
 are still large gaps in my understanding so what follows is definitely
-an incomplete picture and may even be erroneous.
-
-This post will serve a few purposes: first as an alternate
-presentation of the material in my talk, second as an attempt to
-distill everything I learned while preparing for the talk that I may
-not have included, and finally as a kind of experience report from a
-first-time conference speaker.
+an incomplete picture and may even be erroneous. On the other hand,
+I've spent quite a lot of time thinking about this, and perhaps I can
+save someone else a bit of time by capturing what I've found.
 
 ** Haskell and ML
 
@@ -58,11 +48,7 @@ other language that uses Hindley-Milner, since at least as far as the
 type inference algorithms are concerned, these languages are
 similar. In actual fact, the papers that prove the exponential time
 result boil things down to a core ML language which is only a little
-bit richer than the simply typed lambda calculus. It's worth pointing
-out that although Scala is often lumped with these languages due to
-being a functional programming language with a rich static type system
-that includes some type inference, Scala's type system isn't based on
-Hindley-Milner and so I don't think that any of this applies to Scala.
+bit richer than the simply typed lambda calculus.
 
 If you're not familiar with Haskell or ML, this post may still be
 interesting but it will be harder going. At the beginning of my talk I
@@ -70,35 +56,18 @@ tried to give the audience a crash course on the syntax of the lambda
 calculus so that everyone would at least be able to read my slides,
 but I'm going to skip that overview here, on the assumption that there
 are better resources for learning about ML and the lambda calculus
-than a hasty introduction written by me.
-
-Robert Harper of CMU has written [[http://www.cs.cmu.edu/~rwh/smlbook/book.pdf][a very good and freely available
-introductory book]] on Standard ML, which I highly recommend if you're
-interested in learning ML. Standard ML is sort of my Hindley-Milner
-language of choice, but in some circles Haskell considered [[http://matt.might.net/articles/what-cs-majors-should-know/][the crown
-jewel of the Hindley-Milner family]], and there are [[https://github.com/bitemyapp/learnhaskell][loads of high
-quality resources]] for learning Haskell. OCaml would also probably be a
-fine choice. Although I haven't had a chance to use it much, one of
-the !!Con organizers recently [[http://blog.nullspace.io/beginners-guide-to-ocaml-beginners-guides.html][recently blogged]] about getting started
-in OCaml, and it would be a better choice than SML (and maybe Haskell
-too) for more practical projects (i.e. projects that are not ML
-compilers, and maybe even those that are), if that's important to you.
+than a hasty introduction written by me. I've included a couple of
+resources for learning ML at the bottom of the post.
 
 ** Hindley-Milner
 
-For a long time, the performance of Hindley-Milner type inference was
-thought to be [polymorphic? linear?] but this was largely a folklore
-result, until a few different computer scientists proved that the
-actual worst case performance was much slower.
-
-I ran across this in [[http://stackoverflow.com/questions/22060592/very-long-type-inference-sml-trick][a Stack Overflow question (and answer)]], and
-although that answer actually sums up everything in this post and in
-my talk, I ended up having to research this quite a bit more since I
+I ran across this edge case in [[http://stackoverflow.com/questions/22060592/very-long-type-inference-sml-trick][a Stack Overflow question (and answer)]],
+and although that answer actually sums up everything in this post and
+in my talk, I ended up having to research quite a bit more since I
 wasn't able to wrap my head around it with just the examples given
 there. Most of my understanding I derived from the paper "Deciding ML
 typability is complete for deterministic exponential time" published
-by Harry G. Mairson in 1990. (I've included a complete list of
-references at the bottom of this post)
+by Harry G. Mairson in 1990.
 
 The crux of the issue is that there are two features of Hindley-Milner
 type systems that work together to ruin the performance of the
@@ -115,6 +84,12 @@ exponential in size. In fact, the main reason that this edge case is
 not a problem in practice and that Hindley-Milner is "fast enough" is
 that it's extraordinarily rare to have types this large in real
 programs!
+
+I'm still shaky on exactly how these two features conspire, and
+especially how they result in a worst case exponential
+/time/. Unfortunately all of the material on this is either at an
+introductory level or at a kind of nuclear-powered or weapons-grade
+computability and complexity theory level. So bear with me.
 
 ** let-polymorphism
 
@@ -266,6 +241,7 @@ nesting:
         let val x2 = fn y => x1(x1(y)) in
            let val x3 = fn y => x2(x2(y)) in
            x3
+           end
         end
      end
   end
@@ -300,11 +276,91 @@ interesting.
 
 ** pathological case
 
-There are many (in fact, infinitely many, or almost infinitely many)
-different programs that exhibit this pathological behavior. But the
-simplest example I've come across is not that different from the
-example programs above. All we have to do is replace `x0` with a pair
-constructor:
+This function will serve as the basis for the pathological case. It
+takes an argument of any type, and returns a pair where the argument
+is both the first and second parts of the pair. I've named it `square`
+because of its type, which is `'a -> 'a * 'a`; the result type is the
+product of argument type and itself.
+
+#+BEGIN_SRC sml
+  fun square x = (x, x)
+#+END_SRC
+
+The function formed by composing `square` with itself repeatedly
+constructs binary trees where the leaves are all the same value. For
+instance, `square` applied twice produces:
+
+#+BEGIN_SRC sml
+  - square (square 2);
+  val it = ((2,2),(2,2)) : (int * int) * (int * int)
+#+END_SRC
+
+... which might be better visualized as
+
+#+BEGIN_SRC sml
+       ,
+      / \
+     /   \          
+    ,     ,
+   / \   / \
+  2   2 2   2
+#+END_SRC
+
+Applying it again gives another level of nesting:
+
+#+BEGIN_SRC sml
+  - square (square (square 3));
+  val it = (((3,3),(3,3)),((3,3),(3,3)))
+    : ((int * int) * (int * int)) * ((int * int) * (int * int))
+             ,
+            / \
+           /   \
+          /     \
+         /       \
+        /         \
+       ,           ,
+      / \         / \
+     /   \       /   \
+    ,     ,     ,     ,
+   / \   / \   / \   / \
+  3   3 3   3 3   3 3   3
+#+END_SRC
+
+Notice that each time we apply `square`, the type of the result
+doubles in size. The size of the program grows linearly, while the
+type grows exponentially. However, the type has a regular structure
+with a lot of repetition. You can represet trees like this in linear
+space by taking advantage of this to reduce repetition:
+
+#+BEGIN_SRC sml
+  type d1 = int * int
+  type d2 = d1 * d1
+  type d3 = d2 * d2
+  - square (square (square 3)) : d3 ;
+  val it = (((3,3),(3,3)),((3,3),(3,3))) : d3
+#+END_SRC
+
+In the papers this is referred to in a sort of oblique way that
+confused me. For instance: 
+
+"it has a principal type which is of length `Omega(2^(2^cn))` when printed as a string, and has a representation as a directed acyclic graph with Omega(2^cn) nodes" [1]
+
+"types must be represented (and printed out) as directed acyclic
+graphs, or /dags/, since the string representation of a type may be
+exponentially longer than the given expression." [2]
+
+At first, I didn't understand what /printing/ the type had to do with
+anything. It seemed like the sort of low-level implementation details
+that wouldn't matter when discussing an algorithm's performance. But
+it makes sense if you consider that an ML implementation might print
+the complete type without taking shortcuts like the one above.
+
+** *
+
+There are many (in fact, I believe infinitely many) different programs
+that exhibit the pathological behavior. But the simplest example I've
+come across is not that different from the example programs above. All
+we have to do is replace `x0` with a pair constructor:
 
 #+BEGIN_SRC sml
   fun pair x = (x, x)
@@ -317,7 +373,7 @@ us a lot about why it's involved in this pathological case: `'a ->
 'a * 'a`. Compare it with the type of the identity: `'a -> 'a`.
 
 The difference between these two is the return type. In the pair
-function, the return type is the product of the argument type with
+constructor, the return type is the product of the argument type with
 itself. The return type is twice the size of argument type. If you
 apply this function to a value of any type, the return value will have
 a type that is twice as large. If we use `let` to compose the pair
@@ -327,16 +383,31 @@ exponential in size.
 (Do we actually need `let` to construct exponentially large types?)
 
 The actual value we end up assembling is a binary tree (pairs of pairs
-of pairs ...) where the leaves can be any value we choose.
+of pairs ...) where the leaves can be any value we choose, but that
+value will be the same, i.e. every leaf will be the same value, which
+is the initial seed argument to the pair constructor. The result of
+this is that both the value and its type have repeated, identical
+substructures. We can turn this tree into a graph with shared
+sub-graphs, and the resulting graph is actually linear in size, no
+longer exponential.
 
-** structural sharing
+This comes up in a couple of places but in the relevant papers but
+it's always referred to in this oblique way that confused me,
+primarily discussing the difference between printing the type at an
+interactive prompt (REPL) versus an internal representation as a graph
+inside the type checker. But this makes sense if you think about the
+way that the data structure will be printed out, in that since there
+isn't an immediately obvious way to indicate shared substructures,
+you'd probably end up just printing the whole type including the
+repeated bits just for clarity's sake.
 
-type has repeated sub-structures, can turn the tree into a graph with
-shared sub-graphs
+The way to get around this, and make it impossible to compactly
+represent the type, is to force the type inference algorithm to
+generate unique type variables at each node in the tree. The way to do
+that is to change the initial value from a monomorphic one to a value
+with a polymorphic type. The result is an explosion of type variables, since
 
-printing the type vs graph representation
 
-use a polymorphic value to defeat this
 
 ** empirical evidence
 
@@ -349,3 +420,31 @@ different flavors of pathological inputs
 complexity and computability theory
 
 Mairson's proof technique
+
+** References and further reading
+
+*** Links
+
+http://stackoverflow.com/questions/22060592/very-long-type-inference-sml-trick
+
+http://cs.stackexchange.com/questions/6617/concise-example-of-exponential-cost-of-ml-type-inference
+
+*** Papers
+
+1. "Deciding ML typability is complete for deterministic exponential time" Harry G. Mairson
+1990
+
+2. Polymorphic Unification and ML Typing
+Paris C. Kanellakis & John C. Mitchell
+1989
+
+*** Learning ML
+
+Robert Harper of CMU has written [[http://www.cs.cmu.edu/~rwh/smlbook/book.pdf][a very good and freely available
+introductory book]] on Standard ML. I'm also fond of ML for the Working
+Programmer, but it's not freely available.
+
+One of the !!Con organizers recently [[http://blog.nullspace.io/beginners-guide-to-ocaml-beginners-guides.html][recently blogged]] about getting
+started in OCaml, which would be a better choice than SML for more
+practical projects (i.e. projects that are not ML compilers, and maybe
+even those that are).
