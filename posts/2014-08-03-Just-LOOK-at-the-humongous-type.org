@@ -82,8 +82,8 @@ I'm still shaky on exactly how these features of `let` conspire, and
 especially how they result in a worst case exponential
 /time/. Unfortunately all of the material on this either glosses over
 it at an introductory level or consists of towering, nuclear-powered
-computability and complexity proofs. As a result, what follows is
-somewhat rudimentary.
+computational complexity proofs. As a result, what follows is somewhat
+rudimentary.
 
 ** let-polymorphism
 
@@ -153,10 +153,6 @@ rejects this program because it fails to come to terms with applying
 not actually have a type error in it. So in ML, `let` is more than
 syntactic sugar, and this feature is called "let-polymorphism".
 
-(One question that immediately comes to mind is: Why can't you just
-allow polymorphic lambda-bound variables? And I don't know! For now
-I've taken it for granted, but I clearly have more reading to do.)
-
 It turns out that this feature of `let`, although it enables many
 great things like code reuse and local polymorphic variables, also
 enables an ML programmer to write programs that exhibit interesting
@@ -214,17 +210,6 @@ way that the data structure will be printed out, in that since there
 isn't an immediately obvious way to indicate shared substructures,
 you'd probably end up just printing the whole type including the
 repeated bits just for clarity's sake.
-
-In the papers this is referred to in a sort of oblique way that
-confused me. For instance: 
-
-"it has a principal type which is of length `Omega(2^(2^cn))` when
-printed as a string, and has a representation as a directed acyclic
-graph with Omega(2^cn) nodes" [1]
-
-"types must be represented (and printed out) as directed acyclic
-graphs, or /dags/, since the string representation of a type may be
-exponentially longer than the given expression." [2]
 
 At first, I didn't understand what /printing/ the type had to do with
 anything. It seemed like the sort of low-level implementation details
@@ -359,7 +344,7 @@ time". I wish I could say that this is because it explained things in
 a way that was easy to digest for a lay-programmer, but real reason is
 because it is so weird.
 
-I am a complete novice when it comes to computability and complexity
+I am a complete novice when it comes to computational complexity
 theory, so I don't actually know if this is an unusual technique for
 these kinds of proofs, but Mairson's technique suprised me. In order
 to prove that ML type checking is in the "DEXPTIME" class of problems,
@@ -373,6 +358,31 @@ really figure out the proof. It reminds me of when I first read (in
 the Little Schemer) how to embed numbers, booleans and lists in the
 lambda calculus, in its sheer wonderful strangeness.
 
+** questions
+
+Even apart from studying the proof technique in Mairson's paper in
+depth, I've left many questions unanswered. Here's a list of some of
+them.
+
+Why can't we just allow polymorphic lambda-bound variables? What does this have to do with [[http://stackoverflow.com/questions/8296695/is-milner-let-polymorphism-a-rank-2-feature][different "ranks" of polymorphism]]?
+
+How is let-polymorphism implemented? How do you implement it without
+just copying code around?
+
+What's the relationship between `let` enabling exponential function
+composition and the exponential time result? (I included this in my
+talk but cut it from this post because I wasn't able to justify its
+status next to let-polymorphism. And yet, Mairson writes that "the
+inspiration is simply that the exp in exponential function composition
+is the same exp in DEXPTIME" so it's clearly a crucial component.)
+
+Do implementations of Hindley-Milner actually represent types as dags
+and utilize structural sharing? What does a linear-time implementation
+that lacks `let` look like, and how does it differ from the naive,
+non-linear implementation?
+
+"So high, so low, so many things to know..."
+
 ** References and further reading
 
 *** Links
@@ -381,18 +391,33 @@ lambda calculus, in its sheer wonderful strangeness.
 
 [[http://cs.stackexchange.com/questions/6617/concise-example-of-exponential-cost-of-ml-type-inference][CS Stack Exchange: Concise example of exponential cost of ML type inference]]
 
-*** Papers
+*** Papers and other published work
 
 "Deciding ML typability is complete for deterministic exponential time" Harry G. Mairson 1990
 
-"Polymorphic Unification and ML Typing" Paris C. Kanellakis, John C. Mitchell 1989
+"Polymorphic Type Inference" Michael I. Schwartzbach 1995
+
+"Types and Programming Languages" Benjamin C. Pierce 2002
+
+"Programming Languages: Application and Interpretation" Shriram Krishnamurthi (first ed.)
+
+(The answer in that thread on CS Stack Exchange above links to a few
+more papers, but I haven't read them yet.)
 
 *** Learning ML
 
-Robert Harper of CMU has written [[http://www.cs.cmu.edu/~rwh/smlbook/book.pdf][a very good and freely available introductory book]]
-on Standard ML. I'm also fond of ML for the Working Programmer, but it's not freely available.
+Robert Harper of CMU has written [[http://www.cs.cmu.edu/~rwh/smlbook/book.pdf][a very good and freely available introductory book]] on Standard ML. I'm also fond of [[http://www.cl.cam.ac.uk/~lp15/MLbook/][ML for the Working Programmer]], but it's not freely available.
 
-One of the !!Con organizers recently [[http://blog.nullspace.io/beginners-guide-to-ocaml-beginners-guides.html][recently blogged]] about getting
-started in OCaml, which would be a better choice than SML for more
+One of the !!Con organizers [[http://blog.nullspace.io/beginners-guide-to-ocaml-beginners-guides.html][recently blogged]] about getting started in
+OCaml, which would be a better choice than Standard ML for more
 practical projects (i.e. projects that are not ML compilers, and maybe
 even those that are).
+
+*** computational complexity theory
+
+I'm sure I was briefly introduced to complexity classes and the P = NP
+problem in an undergraduate algorithms class, but that would have been
+almost 9 years ago. I tried to brush up before reading these papers
+and almost by accident hit upon the best explanation I've ever been
+exposed to, which I thought might be worth including in this
+list. Unsurprisingly, it's from the [[http://ocw.mit.edu/courses/electrical-engineering-and-computer-science/6-006-introduction-to-algorithms-fall-2011/lecture-videos/lecture-23-computational-complexity/][excellent MIT OCW algorithms class]].
